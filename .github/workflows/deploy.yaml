@@ -50,7 +50,7 @@ jobs:
 
       - name: Deploy to EC2
         env:
-          EC2_HOST: ${{ vars.EC2_HOST }}
+          EC2_HOST: ${{ vars.EC2_HOST || '18.60.61.219' }}
           EC2_USER: ${{ vars.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
