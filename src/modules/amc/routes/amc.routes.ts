@@ -1,0 +1,21 @@
+import { Router } from 'express';
+import { authenticate } from '../../../middleware/authenticate.middleware.js';
+import { requirePermission } from '../../../middleware/authorize.middleware.js';
+import { validateBody, validateQuery } from '../../../middleware/validate.middleware.js';
+import * as controller from '../controllers/amc.controller.js';
+import { contractListSchema, createContractSchema, createScheduleSchema, createServiceSchema, paginationSchema, renewalListSchema, renewalStatusSchema, renewContractSchema, updateScheduleSchema } from '../validations/amc.validation.js';
+
+export const amcRouter = Router();
+amcRouter.use(authenticate);
+amcRouter.post('/', requirePermission('amc.create'), validateBody(createContractSchema), controller.create);
+amcRouter.get('/', requirePermission('amc.read'), validateQuery(contractListSchema), controller.list);
+amcRouter.get('/renewals/upcoming', requirePermission('amc.read'), validateQuery(renewalListSchema), controller.renewals);
+amcRouter.get('/schedules/upcoming', requirePermission('amc.read'), validateQuery(renewalListSchema), controller.upcomingSchedules);
+amcRouter.get('/:contractId', requirePermission('amc.read'), controller.get);
+amcRouter.post('/:contractId/renew', requirePermission('amc.update'), validateBody(renewContractSchema), controller.renew);
+amcRouter.post('/:contractId/cancel', requirePermission('amc.update'), controller.cancel);
+amcRouter.patch('/:contractId/renewal-status', requirePermission('amc.update'), validateBody(renewalStatusSchema), controller.renewalStatus);
+amcRouter.get('/:contractId/service-history', requirePermission('amc.read'), validateQuery(paginationSchema), controller.serviceHistory);
+amcRouter.post('/:contractId/service-history', requirePermission('amc.create'), validateBody(createServiceSchema), controller.recordService);
+amcRouter.post('/:contractId/schedules', requirePermission('amc.create'), validateBody(createScheduleSchema), controller.addSchedule);
+amcRouter.patch('/:contractId/schedules/:scheduleId', requirePermission('amc.update'), validateBody(updateScheduleSchema), controller.updateSchedule);
