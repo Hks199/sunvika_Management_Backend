@@ -1,5 +1,43 @@
 # Production Deployment
 
+## EC2 deployment with GitHub Actions
+
+The `main` branch workflow in [`.github/workflows/deploy.yaml`](../.github/workflows/deploy.yaml) runs `npm test` and, on success, transfers the source to EC2 and runs Docker Compose. It writes `.env.production` on EC2 over the encrypted SSH connection using the configured GitHub Actions secrets and variables. Local `.env` files are never included in the release archive.
+
+### One-time EC2 setup
+
+1. Point an `A` record for `sunvikamanagement.niakylie.com` to the instance's public IPv4 address. Allow inbound TCP ports 80 and 443 in the EC2 security group; restrict SSH (port 22) to trusted addresses.
+2. Install Docker Engine with the Docker Compose plugin, and install Certbot on the instance.
+3. Configure GitHub repository **Settings → Secrets and variables → Actions**. The workflow requires these exact names:
+
+   - **Secrets:** `EC2_SSH_KEY`, `EC2_KNOWN_HOSTS`, `MONGODB_URI`, `JWT_ACCESS_SECRET`.
+   - **Variables:** `EC2_HOST`, `EC2_USER` (optional; defaults to `ubuntu`), `FRONTEND_URL`, `CORS_ORIGINS`.
+   - `EC2_HOST` is the instance public IP or DNS name. `EC2_SSH_KEY` is the PEM private-key contents, not a local file path. `EC2_KNOWN_HOSTS` is the verified SSH host-key line for the instance.
+   - `MONGODB_URI` must be the full production connection string with its password URL-encoded and TLS enabled. `JWT_ACCESS_SECRET` must be a unique random value of at least 32 characters. Do not send either value in chat or commit them.
+   - `FRONTEND_URL` must be the deployed frontend's HTTPS origin (no path); `CORS_ORIGINS` must contain the allowed HTTPS frontend origins, comma-separated if there is more than one. The workflow fails before deployment if required values are missing. `http://localhost:3000` is development-only and will not work in production.
+   - Optional mail settings can be supplied as `SMTP_HOST`, `SMTP_PORT` variables and `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` secrets. Optional S3 settings can use `AWS_REGION` and the `AWS_S3_*` bucket variables, with `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets if an EC2 IAM role is not used. Configure both AWS access-key secrets or neither.
+4. The TLS certificate must be issued before the first deployment. Port 80 must be reachable from the internet and not already in use:
+
+   ```sh
+   sudo certbot certonly --standalone \
+     --agree-tos --non-interactive \
+     --email YOUR_CERTIFICATE_CONTACT_EMAIL \
+     -d sunvikamanagement.niakylie.com
+   ```
+
+   The Nginx config expects the resulting files under `/etc/letsencrypt/live/sunvikamanagement.niakylie.com/`. Install the included renewal hooks after the first deployment so Certbot can use port 80 and restart Nginx after renewal:
+
+   ```sh
+   sudo install -m 755 deploy/certbot/stop-nginx.sh \
+     /etc/letsencrypt/renewal-hooks/pre/stop-sunvika-nginx
+   sudo install -m 755 deploy/certbot/start-nginx.sh \
+     /etc/letsencrypt/renewal-hooks/post/start-sunvika-nginx
+   sudo certbot renew --dry-run
+   ```
+
+   Ensure the instance's Certbot renewal timer is enabled for your installation.
+5. Push the deployment files to `main` or run the workflow manually. The instance must be able to build the Docker image locally. The app container is only exposed on the private Compose network; Nginx handles public HTTP-to-HTTPS redirection and proxies HTTPS requests to it.
+
 ## Container image
 
 Build from the repository root with `docker build -t sunvika-management-backend:latest .`. The image uses a multi-stage Node 22 Alpine build, installs only production dependencies in the runtime stage, runs as the unprivileged `node` user, and uses `dumb-init` for signal forwarding. It exposes port 5000 and has a readiness health check at `/api/v1/health`.

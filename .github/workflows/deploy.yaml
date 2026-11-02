@@ -1,0 +1,136 @@
+name: Test and deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec2-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      PORT: 5000
+      API_PREFIX: /api/v1
+      MONGODB_URI: mongodb://127.0.0.1:27017/sunvika_management
+      JWT_ACCESS_SECRET: test-only-secret-with-at-least-32-characters
+      FRONTEND_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ vars.EC2_HOST }}
+          EC2_USER: ${{ vars.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://sunvikamanagement.niakylie.com' }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS || vars.FRONTEND_URL || 'https://sunvikamanagement.niakylie.com' }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_S3_BUCKET_NAME: ${{ vars.AWS_S3_BUCKET_NAME }}
+          AWS_S3_PROFILE_BUCKET: ${{ vars.AWS_S3_PROFILE_BUCKET }}
+          AWS_S3_CUSTOMER_DOCUMENT_BUCKET: ${{ vars.AWS_S3_CUSTOMER_DOCUMENT_BUCKET }}
+          AWS_S3_QUOTATION_BUCKET: ${{ vars.AWS_S3_QUOTATION_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${EC2_HOST:?Set the EC2_HOST Actions variable}"
+          : "${EC2_SSH_KEY:?Set the EC2_SSH_KEY Actions secret}"
+          : "${EC2_KNOWN_HOSTS:?Set the EC2_KNOWN_HOSTS Actions secret}"
+          : "${MONGODB_URI:?Set the MONGODB_URI Actions secret}"
+          : "${JWT_ACCESS_SECRET:?Set the JWT_ACCESS_SECRET Actions secret}"
+          : "${FRONTEND_URL:?Set the FRONTEND_URL Actions variable to the deployed HTTPS frontend origin}"
+          : "${CORS_ORIGINS:?Set the CORS_ORIGINS Actions variable to the allowed HTTPS frontend origins}"
+          EC2_USER="${EC2_USER:-ubuntu}"
+          DEPLOY_PATH="/opt/sunvika-management-backend"
+
+          if [[ "$FRONTEND_URL" != https://* ]]; then
+            echo "FRONTEND_URL must use HTTPS."
+            exit 1
+          fi
+
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/ec2_deploy_key"
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/ec2_deploy_key" "$HOME/.ssh/known_hosts"
+
+          if [[ -n "$AWS_ACCESS_KEY_ID" && -z "$AWS_SECRET_ACCESS_KEY" ]] ||
+             [[ -z "$AWS_ACCESS_KEY_ID" && -n "$AWS_SECRET_ACCESS_KEY" ]]; then
+            echo "Configure both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or neither."
+            exit 1
+          fi
+
+          {
+            printf 'NODE_ENV=production\nPORT=5000\nAPI_PREFIX=/api/v1\n'
+            printf 'PUBLIC_API_URL=https://sunvikamanagement.niakylie.com/api/v1\n'
+            printf 'MONGODB_URI=%s\nJWT_ACCESS_SECRET=%s\n' "$MONGODB_URI" "$JWT_ACCESS_SECRET"
+            printf 'FRONTEND_URL=%s\nCORS_ORIGINS=%s\n' "$FRONTEND_URL" "$CORS_ORIGINS"
+            if [[ -n "$SMTP_HOST" ]]; then printf 'SMTP_HOST=%s\n' "$SMTP_HOST"; fi
+            if [[ -n "$SMTP_PORT" ]]; then printf 'SMTP_PORT=%s\n' "$SMTP_PORT"; fi
+            if [[ -n "$SMTP_USER" ]]; then printf 'SMTP_USER=%s\n' "$SMTP_USER"; fi
+            if [[ -n "$SMTP_PASSWORD" ]]; then printf 'SMTP_PASSWORD=%s\n' "$SMTP_PASSWORD"; fi
+            if [[ -n "$SMTP_FROM" ]]; then printf 'SMTP_FROM=%s\n' "$SMTP_FROM"; fi
+            if [[ -n "$AWS_REGION" ]]; then printf 'AWS_REGION=%s\n' "$AWS_REGION"; fi
+            if [[ -n "$AWS_S3_BUCKET_NAME" ]]; then printf 'AWS_S3_BUCKET_NAME=%s\n' "$AWS_S3_BUCKET_NAME"; fi
+            if [[ -n "$AWS_S3_PROFILE_BUCKET" ]]; then printf 'AWS_S3_PROFILE_BUCKET=%s\n' "$AWS_S3_PROFILE_BUCKET"; fi
+            if [[ -n "$AWS_S3_CUSTOMER_DOCUMENT_BUCKET" ]]; then printf 'AWS_S3_CUSTOMER_DOCUMENT_BUCKET=%s\n' "$AWS_S3_CUSTOMER_DOCUMENT_BUCKET"; fi
+            if [[ -n "$AWS_S3_QUOTATION_BUCKET" ]]; then printf 'AWS_S3_QUOTATION_BUCKET=%s\n' "$AWS_S3_QUOTATION_BUCKET"; fi
+            if [[ -n "$AWS_ACCESS_KEY_ID" ]]; then printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"; fi
+          } | ssh -i "$HOME/.ssh/ec2_deploy_key" \
+            -o IdentitiesOnly=yes \
+            "$EC2_USER@$EC2_HOST" \
+            "umask 077 && cat > '$DEPLOY_PATH/.env.production'"
+
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=dist \
+            --exclude=coverage \
+            --exclude=tests \
+            --exclude=.env \
+            --exclude='.env.*' \
+            -czf - . |
+            ssh -i "$HOME/.ssh/ec2_deploy_key" \
+              -o IdentitiesOnly=yes \
+              "$EC2_USER@$EC2_HOST" \
+              "mkdir -p '$DEPLOY_PATH' && tar -xzf - -C '$DEPLOY_PATH' && cd '$DEPLOY_PATH' && docker compose up -d --build --remove-orphans && sudo install -m 755 deploy/certbot/stop-nginx.sh /etc/letsencrypt/renewal-hooks/pre/stop-sunvika-nginx && sudo install -m 755 deploy/certbot/start-nginx.sh /etc/letsencrypt/renewal-hooks/post/start-sunvika-nginx"
