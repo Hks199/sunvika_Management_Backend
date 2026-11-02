@@ -50,10 +50,10 @@ jobs:
 
       - name: Deploy to EC2
         env:
-          EC2_HOST: ${{ vars.EC2_HOST || '18.60.61.219' }}
-          EC2_USER: ${{ vars.EC2_USER }}
+          EC2_HOST: ${{ vars.EC2_HOST || secrets.EC2_HOST || '18.60.61.219' }}
+          EC2_USER: ${{ vars.EC2_USER || secrets.EC2_USER || 'ubuntu' }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS || vars.EC2_KNOWN_HOSTS }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
           FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://sunvikamanagement.niakylie.com' }}
@@ -83,6 +83,11 @@ jobs:
           : "${CORS_ORIGINS:?Set the CORS_ORIGINS Actions variable to the allowed HTTPS frontend origins}"
           EC2_USER="${EC2_USER:-ubuntu}"
           DEPLOY_PATH="/opt/sunvika-management-backend"
+
+          if [[ ${#JWT_ACCESS_SECRET} -lt 32 || "${JWT_ACCESS_SECRET,,}" == *replace-with* ]]; then
+            echo "JWT_ACCESS_SECRET must be a unique, non-placeholder value of at least 32 characters."
+            exit 1
+          fi
 
           if [[ "$FRONTEND_URL" != https://* ]]; then
             echo "FRONTEND_URL must use HTTPS."
