@@ -41,10 +41,11 @@ async function canCreateRole(actorId: Types.ObjectId, roleCode: string) {
   if (creatorRole.category === 'ADMIN_HEAD') throw new AppError('Admin Head accounts cannot create employees', 403);
   const targetRole = await RoleModel.findOne({ code: roleCode.toUpperCase(), isActive: true });
   if (!targetRole) throw new AppError('Selected role is not available', 400);
+  const isCreatingManagingDirector = creatorRole.code === 'MD' && targetRole.code === 'MD';
   if (targetRole.category === 'ADMIN_HEAD') {
     if (!['MD', 'BDO'].includes(creatorRole.code)) throw new AppError('Only MD or BDO can create Admin Head accounts', 403);
     if (!creatorRole.allowedChildRoles.some((id) => id.equals(targetRole._id))) throw new AppError('Admin Head creation is disabled for your role', 403);
-  } else if (creatorRole.category !== 'PRIMARY' || !creatorRole.allowedChildRoles.some((id) => id.equals(targetRole._id))) {
+  } else if (!isCreatingManagingDirector && (creatorRole.category !== 'PRIMARY' || !creatorRole.allowedChildRoles.some((id) => id.equals(targetRole._id)))) {
     throw new AppError('You are not allowed to create employees with this role', 403);
   }
   return { creatorRole, targetRole };
@@ -57,7 +58,10 @@ async function getCreatableRoles(actorId: Types.ObjectId) {
     ? creatorRole.allowedChildRoles
     : [];
   const roles = await RoleModel.find({
-    _id: { $in: eligibleCodes },
+    $or: [
+      { _id: { $in: eligibleCodes } },
+      ...(creatorRole.code === 'MD' ? [{ code: 'MD' }] : [])
+    ],
     isActive: true,
     ...(creatorRole.code !== 'MD' && creatorRole.code !== 'BDO' ? { category: { $ne: 'ADMIN_HEAD' } } : {})
   }).select('_id name code category level').sort({ level: 1, name: 1 }).lean();
@@ -95,10 +99,11 @@ export const employeeService = {
     await geographyService.validateEmployeePlacement(input.address.state, input.address.district, input.branch);
     const { creatorRole, targetRole } = await canCreateRole(actorId, input.roleCode);
     const isAdminHead = targetRole.category === 'ADMIN_HEAD';
-    const reportingTo = isAdminHead ? undefined : actorId;
-    const parent = isAdminHead ? null : await EmployeeModel.findById(actorId).select('hierarchyPath').lean();
-    if (!isAdminHead && !parent) throw new AppError('Reporting manager is unavailable', 404);
-    const hierarchyPath = isAdminHead ? [] : [...parent!.hierarchyPath, actorId];
+    const isHierarchyRoot = isAdminHead || targetRole.code === 'MD';
+    const reportingTo = isHierarchyRoot ? undefined : actorId;
+    const parent = isHierarchyRoot ? null : await EmployeeModel.findById(actorId).select('hierarchyPath').lean();
+    if (!isHierarchyRoot && !parent) throw new AppError('Reporting manager is unavailable', 404);
+    const hierarchyPath = isHierarchyRoot ? [] : [...parent!.hierarchyPath, actorId];
     const employeeCode = input.employeeCode?.trim().toUpperCase() || `SVK-${randomBytes(5).toString('hex').toUpperCase()}`;
     const address = {
       addressLine: input.address.addressLine,
@@ -164,7 +169,7 @@ export const employeeService = {
   async getDownline(actorId: Types.ObjectId, pagination: PaginationInput) {
     const role = await actorRole(actorId);
     if (role.category === 'ADMIN_HEAD') return { data: [], meta: createPaginationMeta(pagination.page, pagination.limit, 0) };
-    const query = role.code === 'MD' ? { isActive: true } : { hierarchyPath: actorId, isActive: true };
+    const query = role.code === 'MD' ? {} : { hierarchyPath: actorId, isActive: true };
     const [data, total] = await Promise.all([
       EmployeeModel.find(query).select('-passwordHash -failedLoginAttempts -lockedUntil').populate('role', 'name code category level').sort({ createdAt: -1 }).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).lean(),
       EmployeeModel.countDocuments(query)
@@ -244,7 +249,9 @@ export const employeeService = {
     if (manager.hierarchyPath.some((id) => id.equals(employeeObjectId))) throw new AppError('Reporting change would create a circular hierarchy', 400);
     const targetRole = await RoleModel.findById(employee.role).select('category code').lean();
     const managerRole = await RoleModel.findById(manager.role);
-    if (!targetRole || !managerRole || targetRole.category === 'ADMIN_HEAD') throw new AppError('Admin Head accounts do not participate in the reporting hierarchy', 400);
+    if (!targetRole || !managerRole || targetRole.category === 'ADMIN_HEAD' || targetRole.code === 'MD') {
+      throw new AppError('Managing Director and Admin Head accounts do not participate in the reporting hierarchy', 400);
+    }
     if (!managerRole.allowedChildRoles.some((id) => id.equals(employee.role))) throw new AppError('The reporting manager is not allowed to manage this role', 400);
     const actor = await actorRole(actorId);
     if (actor.code !== 'MD' && !manager._id.equals(actorId) && !manager.hierarchyPath.some((id) => id.equals(actorId))) {

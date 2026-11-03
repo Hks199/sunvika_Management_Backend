@@ -162,6 +162,7 @@ test('hierarchy employee policy allows only self, downline, and explicit MD acce
   assert.equal(canAccessEmployeeByPolicy({ ...base, targetHierarchyPath: ['root', 'actor'] }), true);
   assert.equal(canAccessEmployeeByPolicy(base), false);
   assert.equal(canAccessEmployeeByPolicy({ ...base, actorRoleCode: 'MD', targetRoleCategory: 'ADMIN_HEAD' }), true);
+  assert.equal(canAccessEmployeeByPolicy({ ...base, actorRoleCode: 'MD', targetId: 'another-md' }), true);
 });
 
 test('Admin Head employee visibility is restricted to BDO-created accounts in its downline', () => {
