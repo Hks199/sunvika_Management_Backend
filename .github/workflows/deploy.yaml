@@ -59,8 +59,8 @@ jobs:
           JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
           JWT_ACCESS_EXPIRES_IN: ${{ vars.JWT_ACCESS_EXPIRES_IN || '15m' }}
           REFRESH_TOKEN_EXPIRES_DAYS: ${{ vars.REFRESH_TOKEN_EXPIRES_DAYS || '30' }}
-          FRONTEND_URL: https://sunvikamanagementhub.netlify.app
-          CORS_ORIGINS: https://sunvikamanagementhub.netlify.app
+          FRONTEND_URL: ${{ vars.FRONTEND_URL || 'https://sunvikamanagementhub.netlify.app' }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS || vars.FRONTEND_URL || 'https://sunvikamanagementhub.netlify.app' }}
           SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
           SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
           SMTP_SECURE: ${{ vars.SMTP_SECURE || 'false' }}
@@ -68,8 +68,8 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM || vars.SMTP_FROM }}
           BCRYPT_SALT_ROUNDS: ${{ vars.BCRYPT_SALT_ROUNDS || '12' }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          AWS_S3_BUCKET_NAME: ${{ vars.AWS_S3_BUCKET_NAME }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-2' }}
+          AWS_S3_BUCKET_NAME: ${{ vars.AWS_S3_BUCKET_NAME || 'sunvika-media' }}
           AWS_S3_PROFILE_BUCKET: ${{ vars.AWS_S3_PROFILE_BUCKET }}
           AWS_S3_CUSTOMER_DOCUMENT_BUCKET: ${{ vars.AWS_S3_CUSTOMER_DOCUMENT_BUCKET }}
           AWS_S3_QUOTATION_BUCKET: ${{ vars.AWS_S3_QUOTATION_BUCKET }}
