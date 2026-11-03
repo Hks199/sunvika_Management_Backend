@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: sunvika-management-backend:latest
     env_file:
       - .env.production
     expose:

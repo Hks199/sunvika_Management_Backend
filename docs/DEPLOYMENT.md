@@ -38,7 +38,7 @@ The `main` branch workflow in [`.github/workflows/deploy.yaml`](../.github/workf
    ```
 
    Ensure the instance's Certbot renewal timer is enabled for your installation.
-5. Push the deployment files to `main` or run the workflow manually. The instance must be able to build the Docker image locally. The app container is only exposed on the private Compose network; Nginx handles public HTTP-to-HTTPS redirection and proxies HTTPS requests to it.
+5. Push the deployment files to `main` or run the workflow manually. GitHub Actions builds the Docker image and transfers it to EC2 over SSH; the instance does not compile the application. The app container is only exposed on the private Compose network; Nginx handles public HTTP-to-HTTPS redirection and proxies HTTPS requests to it.
 
 ## Container image
 
