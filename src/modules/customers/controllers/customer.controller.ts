@@ -41,3 +41,7 @@ export const completeDocumentUpload = handler('Customer document uploaded succes
 export const documentDownloadUrl = handler('Customer document download URL created', (req) => customerDocumentService.downloadUrl(actorId(req), req.params.customerId as string, req.params.documentId as string));
 export const documentPreviewUrl = handler('Customer document preview URL created', (req) => customerDocumentService.previewUrl(actorId(req), req.params.customerId as string, req.params.documentId as string));
 export const verifyDocument = handler('Customer document verification updated', (req) => customerDocumentService.verify(actorId(req), req.params.customerId as string, req.params.documentId as string, req.body.status, req.body.remark));
+
+import { customerCpService } from '../services/customer-cp.service.js';
+export const cpConversionOptions = handler('Customer CP conversion options', (req) => customerCpService.options(actorId(req), req.params.customerId as string));
+export const convertToCp = handler('Customer converted to CP', (req) => customerCpService.convert(actorId(req), req.params.customerId as string, req.body));

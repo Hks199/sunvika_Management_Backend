@@ -21,7 +21,7 @@ employeeRouter.post('/profile-image-upload-url', requirePermission('employees.cr
 employeeRouter.get('/:employeeId/profile-image-url', requirePermission('employees.read'), controller.getProfileImageUrl);
 employeeRouter.get('/', requirePermission('employees.read'), validateQuery(paginationSchema), controller.list);
 employeeRouter.get('/downline', requirePermission('employees.read'), validateQuery(paginationSchema), controller.downline);
-employeeRouter.get('/:employeeId/hierarchy', requirePermission('employees.hierarchy'), controller.hierarchy);
+employeeRouter.get('/:employeeId/hierarchy', requirePermission('employees.read'), controller.hierarchy);
 employeeRouter.get('/:employeeId', requirePermission('employees.read'), controller.getById);
 employeeRouter.patch('/:employeeId', requirePermission('employees.update'), validateBody(updateEmployeeSchema), controller.update);
 employeeRouter.post('/:employeeId/activate', requirePermission('employees.activate'), controller.activate);

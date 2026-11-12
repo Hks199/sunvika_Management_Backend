@@ -1,3 +1,4 @@
+import { hasOrganizationVisibility } from './visibility-policy.js';
 import { Types } from 'mongoose';
 import { AppError } from '../../../utils/app-error.util.js';
 import { BranchModel } from '../../geography/models/branch.model.js';
@@ -60,7 +61,7 @@ export async function accessibleEmployeeScope(actorId: Types.ObjectId): Promise<
   const actor = await EmployeeModel.findById(actorId).select('role').lean();
   const role = actor ? await RoleModel.findById(actor.role).select('code category').lean() : null;
   if (!role) throw new AppError('Employee role is unavailable', 403);
-  if (role.code === 'MD' || role.category === 'ADMIN_HEAD') return null;
+  if (hasOrganizationVisibility(role.code) || role.category === 'ADMIN_HEAD') return null;
   return hierarchyService.getDownlineEmployeeIds(actorId);
 }
 

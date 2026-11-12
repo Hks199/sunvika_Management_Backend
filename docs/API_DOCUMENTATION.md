@@ -27,3 +27,7 @@ The interactive Swagger UI is served from `/api-docs` when `SWAGGER_ENABLED=true
 | Audit log | [AUDIT.md](AUDIT.md) | `/audit-logs` |
 
 The health/readiness endpoint is `GET /health`. It returns HTTP 503 until MongoDB is connected.
+
+Query conversations and per-user bell notifications: [QUERIES.md](QUERIES.md), `/queries` and `/notifications`.
+
+Sticky scoped announcement bar and publishing API: [ANNOUNCEMENTS.md](ANNOUNCEMENTS.md), `/announcements`.

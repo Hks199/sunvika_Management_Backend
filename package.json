@@ -12,7 +12,8 @@
     "test": "npm run build && node tests/unit.test.mjs && node tests/integration.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "bootstrap:md": "node dist/scripts/create-first-md.js",
-    "seed:system-roles": "node dist/scripts/seed-system-roles.js"
+    "seed:system-roles": "node dist/scripts/seed-system-roles.js",
+    "migrate:direct-md": "node dist/scripts/migrate-direct-md-hierarchy.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -24,6 +25,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",

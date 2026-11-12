@@ -29,8 +29,8 @@ export const requireGeographyManagement: RequestHandler = async (req, _res, next
     if (!req.auth) throw new AppError('Authentication required', 401);
     const employee = await EmployeeModel.findById(req.auth.employeeId).select('role').lean();
     const role = employee ? await RoleModel.findById(employee.role).select('code isActive').lean() : null;
-    if (!role?.isActive || !['MD', 'BDO'].includes(role.code)) {
-      throw new AppError('Only MD and BDO employees can add states, districts, or branches', 403);
+    if (!role?.isActive || !['MD', 'MIS'].includes(role.code)) {
+      throw new AppError('Only MD and MIS employees can add states, districts, or branches', 403);
     }
     return next();
   } catch (error) { return next(error); }

@@ -6,28 +6,31 @@ Sunvika authorization has a capability check and a separate resource-scope check
 
 | Code | Category | Parent | Allowed children |
 | --- | --- | --- | --- |
-| MD | PRIMARY | — | BDO, Admin Head |
-| BDO | PRIMARY | MD | MH, Admin Head |
-| MH | PRIMARY | BDO | DC |
-| DC | PRIMARY | MH | RM |
-| RM | PRIMARY | DC | CP |
+| MD | PRIMARY | - | MIS, CP Head |
+| MIS | PRIMARY | MD | - |
+| CP Head | PRIMARY | MD | RM |
+| RM | PRIMARY | CP Head | CP |
 | CP | PRIMARY | RM | — |
-| ADMIN_HEAD | ADMIN_HEAD | — | — |
 
-Admin Head is outside the reporting tree. Only MD/BDO can create it, and the creator's configured allowed-child policy must permit it. Admin Head data access is an explicit policy for permitted leads/customer operations and does not imply employee/role administration.
+Admin Head (`ADMIN_HEAD`) is retired. It is excluded from role lists, employee creation and announcement audiences. The reserved code cannot be recreated.
 
 ## Protected policy
 
 - Only an employee whose active role code is `MD` can call role/permission administration routes.
 - The MD role is immutable through API updates. The bootstrap command creates it once.
 - `roles.manage`, `permissions.manage`, and `employees.bootstrap` cannot be assigned through ordinary role configuration. MD authorization is enforced by backend policy.
-- Reserved system role codes cannot be created as custom roles. BDO can only be created by MD. Admin Head can only be created by MD or BDO.
+- Reserved system role codes cannot be created as custom roles. MIS can only be created by MD. Admin Head cannot be created or reactivated.
 - A role can only create a direct configured child role. Employee creation accepts a role code, not client-supplied role IDs or hierarchy paths.
 - Custom role permission updates increment `permissionVersion`; local permission caches are invalidated, and version checks catch updates across application instances within the short cache TTL.
 - Deactivating a custom role revokes its employees' refresh sessions. Authentication also checks role activity.
 
 Permission administration accepts permission codes and child role codes. A custom role must be created with its reporting parent first, then explicitly added to that parent's `allowedChildRoles`. Primary hierarchy child relationships must match `parentRole` and descend in level.
 
-## Admin Head data policy
+## Retired Admin Head references
 
-Admin Head uses its assigned capability list plus a distinct organization-wide resource policy for leads, customers, visits, and quotations. It has no general employee downline and cannot administer role configuration. MD can access all employees. BDO employee scope includes its hierarchy and Admin Head accounts created by its downline.
+Startup and role seeding deactivate legacy Admin Head roles, remove allowed-child links and revoke their refresh sessions. Authentication also explicitly rejects the retired role. Existing role/employee/business-history references are preserved; no accounts or historical records are deleted. MD keeps full access and MIS keeps organization-wide business viewing with its existing management restrictions.
+
+System role codes are `MIS` (Management Information System) and `CP_HEAD` (Channel Partner Head). On startup and when running `npm run seed:system-roles`, existing BDO/DC roles are renamed in place, preserving their IDs, employee assignments, permissions, and hierarchy references. Conflicting legacy/new codes stop migration for manual resolution. Legacy codes remain reserved and cannot be recreated as custom roles.
+
+
+MIS has organization-wide read visibility for employee/CP lists, employee details and reporting chains, leads and status histories, customers and timelines/documents, visits and follow-ups, quotations/downloads/share histories, AMC details/service histories, and dashboard/report data. Its business `.read` permissions are enforced by runtime policy and included in `/auth/me`, so existing MIS roles work without a database reseed. Read paths explicitly use `read` access; management paths default to `manage` and retain the original hierarchy checks. Customer-to-CP conversion, account creation, role management and query/inbox privacy retain their existing policies. No database ownership or reporting paths change.

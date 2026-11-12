@@ -82,3 +82,41 @@ test('login and cookie-authenticated mutations reject unapproved request origins
   assert.equal(response.status, 403);
   assert.equal(response.headers.get('access-control-allow-origin'), null);
 });
+
+
+test('calling-list upload, preview, download and conversion endpoints require authentication', async () => {
+  const listId = '0123456789abcdef01234567';
+  for (const [path, method] of [['/calling-lists/template', 'GET'], ['/calling-lists', 'GET'], ['/calling-lists', 'POST'], ['/calling-lists/managers', 'GET'], ['/calling-lists/filter-options', 'GET'], [`/calling-lists/${listId}/file`, 'PUT'], [`/calling-lists/${listId}/preview`, 'GET'], [`/calling-lists/${listId}/download-url`, 'GET'], [`/calling-lists/${listId}/assignment`, 'PATCH'], [`/calling-lists/${listId}/candidates/${listId}/create-cp`, 'POST'], [`/calling-lists/${listId}/candidates/${listId}?confirm=true`, 'DELETE'], [`/calling-lists/${listId}/candidates/${listId}/status`, 'PATCH']]) {
+    const response = await fetch(`${baseUrl}/api/v1${path}`, { method });
+    assert.equal(response.status, 401, `${method} ${path}`);
+  }
+});
+
+
+test('customer-to-CP preparation and confirmation require authentication', async () => {
+  const customerId = '0123456789abcdef01234567';
+  for (const [method, path] of [['GET', 'cp-conversion'], ['POST', 'convert-to-cp']]) {
+    const response = await fetch(`${baseUrl}/api/v1/customers/${customerId}/${path}`, { method });
+    assert.equal(response.status, 401);
+  }
+});
+
+
+test('query conversations and per-user notifications reject unauthenticated requests', async () => {
+  const id='0123456789abcdef01234567';
+  for(const [method,path] of [['GET','/queries'],['GET','/queries/recipients'],['POST','/queries'],['GET',`/queries/${id}`],['POST',`/queries/${id}/replies`],['POST',`/queries/${id}/seen`],['GET','/notifications'],['POST',`/notifications/${id}/seen`]]) {
+    const response=await fetch(`${baseUrl}/api/v1${path}`,{method});assert.equal(response.status,401,`${method} ${path}`);
+  }
+});
+
+
+test('announcement feeds and publishing require a live authenticated session',async()=>{
+  for(const [method,path]of[['GET','/announcements/feed'],['GET','/announcements/audience'],['GET','/announcements'],['POST','/announcements'],['PATCH','/announcements/0123456789abcdef01234567']]){const response=await fetch(`${baseUrl}/api/v1${path}`,{method});assert.equal(response.status,401,`${method} ${path}`);}
+});
+
+
+test('calling daily reports and upline verification require authentication',async()=>{
+  for(const [method,path]of[['GET','/calling-reports/options'],['GET','/calling-reports?period=WEEK'],['POST','/calling-reports/today'],['POST','/calling-reports/0123456789abcdef01234567/verify']]){
+    const response=await fetch(`${baseUrl}/api/v1${path}`,{method});assert.equal(response.status,401,`${method} ${path}`);
+  }
+});

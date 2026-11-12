@@ -258,11 +258,11 @@ export const customerDocumentService = {
     return document;
   },
   async list(actorId: Types.ObjectId, customerId: string) {
-    const customer = await assertCustomerAccess(actorId, parseId(customerId, 'customer ID'));
+    const customer = await assertCustomerAccess(actorId, parseId(customerId, 'customer ID'), 'read');
     return CustomerDocumentModel.find({ customer: customer._id }).select('-s3Key').populate('uploadedBy', 'employeeCode firstName lastName').populate('verifiedBy', 'employeeCode firstName lastName').sort({ uploadedAt: -1 }).lean();
   },
   async downloadUrl(actorId: Types.ObjectId, customerId: string, documentId: string) {
-    const customer = await assertCustomerAccess(actorId, parseId(customerId, 'customer ID'));
+    const customer = await assertCustomerAccess(actorId, parseId(customerId, 'customer ID'), 'read');
     const document = await CustomerDocumentModel.findOne({ _id: parseId(documentId, 'document ID'), customer: customer._id }).select('s3Key fileName');
     if (!document) throw new AppError('Customer document not found', 404);
     const command = new GetObjectCommand({ Bucket: env.awsCustomerDocumentBucketName, Key: document.s3Key, ResponseContentDisposition: `attachment; filename="${safeFileName(document.fileName)}"` });
@@ -270,7 +270,7 @@ export const customerDocumentService = {
     return { url, expiresInSeconds: 300 };
   },
   async previewUrl(actorId: Types.ObjectId, customerId: string, documentId: string) {
-    const customer = await assertCustomerAccess(actorId, parseId(customerId, 'customer ID'));
+    const customer = await assertCustomerAccess(actorId, parseId(customerId, 'customer ID'), 'read');
     const document = await CustomerDocumentModel.findOne({ _id: parseId(documentId, 'document ID'), customer: customer._id }).select('s3Key fileName mimeType');
     if (!document) throw new AppError('Customer document not found', 404);
     const command = new GetObjectCommand({

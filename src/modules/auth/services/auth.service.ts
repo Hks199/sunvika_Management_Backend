@@ -1,3 +1,4 @@
+import { MIS_READ_PERMISSIONS } from '../../employees/services/visibility-policy.js';
 import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { Types } from 'mongoose';
@@ -47,7 +48,7 @@ async function publicEmployee(employee: {
   isActive: boolean;
   isVerified: boolean;
 }): Promise<PublicEmployee> {
-  const role = await RoleModel.findOne({ _id: employee.role, isActive: true }).select('code name level category permissions').lean();
+  const role = await RoleModel.findOne({ _id: employee.role, isActive: true, code: { $ne: 'ADMIN_HEAD' }, category: { $ne: 'ADMIN_HEAD' } }).select('code name level category permissions').lean();
   if (!role) throw new AppError('Employee role is unavailable', 403);
   const permissions = await PermissionModel.find({ _id: { $in: role.permissions } }).select('code').lean();
   return {
@@ -58,7 +59,7 @@ async function publicEmployee(employee: {
     lastName: employee.lastName,
     email: employee.email,
     mobileNumber: employee.mobileNumber,
-    role: { id: employee.role.toString(), code: role.code, name: role.name, level: role.level, category: role.category, permissions: permissions.map(({ code }) => code) },
+    role: { id: employee.role.toString(), code: role.code, name: role.name, level: role.level, category: role.category, permissions: [...new Set([...permissions.map(({ code }) => code), ...(role.code === 'MIS' ? MIS_READ_PERMISSIONS : [])])] },
     isActive: employee.isActive,
     isVerified: employee.isVerified
   };
@@ -97,7 +98,7 @@ export const authService = {
       await comparePassword(password, await DUMMY_PASSWORD_HASH);
       throw new AppError(GENERIC_AUTH_ERROR, 401);
     }
-    if (!await RoleModel.exists({ _id: employee.role, isActive: true })) {
+    if (!await RoleModel.exists({ _id: employee.role, isActive: true, code: { $ne: 'ADMIN_HEAD' }, category: { $ne: 'ADMIN_HEAD' } })) {
       await comparePassword(password, await DUMMY_PASSWORD_HASH);
       throw new AppError(GENERIC_AUTH_ERROR, 401);
     }
@@ -134,7 +135,7 @@ export const authService = {
     }
     if (existing.expiresAt <= new Date()) throw new AppError('Refresh session is invalid or expired', 401);
     const employee = await EmployeeModel.findOne({ _id: existing.employee, isActive: true });
-    const roleIsActive = employee ? await RoleModel.exists({ _id: employee.role, isActive: true }) : null;
+    const roleIsActive = employee ? await RoleModel.exists({ _id: employee.role, isActive: true, code: { $ne: 'ADMIN_HEAD' }, category: { $ne: 'ADMIN_HEAD' } }) : null;
     if (!employee || !roleIsActive) {
       await RefreshTokenModel.updateMany({ familyId: existing.familyId, revokedAt: null }, { $set: { revokedAt: new Date() } });
       throw new AppError('Account is unavailable', 401);

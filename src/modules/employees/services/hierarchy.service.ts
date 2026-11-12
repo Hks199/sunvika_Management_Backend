@@ -1,3 +1,5 @@
+import type { AccessMode } from './visibility-policy.js';
+import { EMPLOYEE_DETAIL_REFERENCES } from './employee-reference-populations.js';
 import { Types } from 'mongoose';
 import { EmployeeModel } from '../models/employee.model.js';
 import { RoleModel } from '../../roles/models/role.model.js';
@@ -7,7 +9,7 @@ export const hierarchyService = {
   async getAncestors(employeeId: Types.ObjectId | string) {
     const employee = await EmployeeModel.findById(employeeId).select('hierarchyPath').lean();
     if (!employee) return [];
-    const ancestors = await EmployeeModel.find({ _id: { $in: employee.hierarchyPath } }).lean();
+    const ancestors = await EmployeeModel.find({ _id: { $in: employee.hierarchyPath } }).select('-passwordHash -failedLoginAttempts -lockedUntil').populate(EMPLOYEE_DETAIL_REFERENCES).lean();
     const byId = new Map(ancestors.map((ancestor) => [ancestor._id.toString(), ancestor]));
     return employee.hierarchyPath.map((id) => byId.get(id.toString())).filter((ancestor) => ancestor !== undefined);
   },
@@ -26,7 +28,7 @@ export const hierarchyService = {
     const employee = await EmployeeModel.findById(employeeId).select('hierarchyPath').lean();
     if (!employee) return [];
     const chain = await this.getAncestors(employeeId);
-    const self = await EmployeeModel.findById(employeeId).lean();
+    const self = await EmployeeModel.findById(employeeId).select('-passwordHash -failedLoginAttempts -lockedUntil').populate(EMPLOYEE_DETAIL_REFERENCES).lean();
     return self ? [...chain, self] : chain;
   },
 
@@ -36,7 +38,7 @@ export const hierarchyService = {
     return Boolean(await EmployeeModel.exists({ _id: targetId, hierarchyPath: actor }));
   },
 
-  async canAccessEmployee(actorId: Types.ObjectId | string, targetId: Types.ObjectId | string): Promise<boolean> {
+  async canAccessEmployee(actorId: Types.ObjectId | string, targetId: Types.ObjectId | string, accessMode: AccessMode = 'manage'): Promise<boolean> {
     const actor = await EmployeeModel.findById(actorId).select('role').lean();
     const target = await EmployeeModel.findById(targetId).select('role hierarchyPath createdBy').lean();
     if (!actor || !target) return false;
@@ -47,13 +49,13 @@ export const hierarchyService = {
       : false;
     return canAccessEmployeeByPolicy({
       actorId: actor._id.toString(), actorRoleCode: actorRole?.code, actorRoleCategory: actorRole?.category,
-      targetId: target._id.toString(), targetRoleCategory: targetRole?.category,
+      accessMode, targetId: target._id.toString(), targetRoleCategory: targetRole?.category,
       targetCreatorIsInActorHierarchy,
       targetHierarchyPath: target.hierarchyPath.map((id) => id.toString())
     });
   },
 
-  async canAccessResource(actorId: Types.ObjectId | string, ownerId: Types.ObjectId | string, resourceType: BusinessResource): Promise<boolean> {
+  async canAccessResource(actorId: Types.ObjectId | string, ownerId: Types.ObjectId | string, resourceType: BusinessResource, accessMode: AccessMode = 'manage'): Promise<boolean> {
     const actor = await EmployeeModel.findById(actorId).select('role').lean();
     if (!actor) return false;
     const role = await RoleModel.findById(actor.role).select('code category').lean();
@@ -64,7 +66,7 @@ export const hierarchyService = {
       : Boolean(await EmployeeModel.exists({ _id: ownerId, hierarchyPath: actor._id }));
     return canAccessOwnedResourceByPolicy({
       actorId: actorIdString, actorRoleCode: role?.code, actorRoleCategory: role?.category,
-      ownerId: ownerIdString, ownerIsInActorHierarchy, resourceType
+      accessMode, ownerId: ownerIdString, ownerIsInActorHierarchy, resourceType
     });
   }
 };

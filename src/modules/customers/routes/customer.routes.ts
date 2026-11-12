@@ -7,8 +7,12 @@ import { validateBody, validateQuery } from '../../../middleware/validate.middle
 import * as controller from '../controllers/customer.controller.js';
 import { completeDocumentUploadSchema, convertLeadSchema, createDocumentUploadSchema, createLeadConversionUploadsSchema, customerListQuerySchema, updateCustomerSchema, verifyDocumentSchema } from '../validations/customer.validation.js';
 
+import { customerCpSchema } from '../services/customer-cp.service.js';
+
 export const customerRouter = Router();
 customerRouter.use(authenticate);
+customerRouter.get('/:customerId/cp-conversion', requirePermission('customers.read'), requirePermission('employees.create'), controller.cpConversionOptions);
+customerRouter.post('/:customerId/convert-to-cp', requirePermission('customers.read'), requirePermission('employees.create'), validateBody(customerCpSchema), controller.convertToCp);
 customerRouter.post('/from-lead/:leadId/document-upload-urls', requirePermission('customers.create'), validateBody(createLeadConversionUploadsSchema), controller.createLeadConversionUploadUrls);
 customerRouter.put('/from-lead/:leadId/document-uploads/:uploadId', requirePermission('customers.create'), express.raw({
   type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],

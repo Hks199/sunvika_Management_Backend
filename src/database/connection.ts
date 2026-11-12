@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CallingActivityModel, CallingDailyReportModel } from '../modules/calling-reports/calling-report.models.js';
 import { env } from '../config/env.config.js';
 import { logger } from '../services/logger.service.js';
 import { StateModel } from '../modules/geography/models/state.model.js';
@@ -29,12 +30,13 @@ export async function connectDatabase(): Promise<void> {
     maxPoolSize: env.mongoMaxPoolSize,
     autoIndex: env.nodeEnv !== 'production'
   });
+  await Promise.all([CallingActivityModel.init(), CallingDailyReportModel.init()]);
   if (env.nodeEnv === 'production') await Promise.all([
     StateModel.createIndexes(), DistrictModel.createIndexes(), BranchModel.createIndexes(),
     LeadModel.createIndexes(), LeadStatusHistoryModel.createIndexes(), VisitModel.createIndexes(),
     CustomerModel.createIndexes(), CustomerDocumentModel.createIndexes(), CustomerDocumentUploadModel.createIndexes(), CustomerActivityModel.createIndexes(),
     QuotationModel.createIndexes(), QuotationSequenceModel.createIndexes(), BrochureModel.createIndexes(), PublicShareLinkModel.createIndexes(), QuotationShareModel.createIndexes(),
-    AMCContractModel.createIndexes(), AMCScheduleModel.createIndexes(), AMCServiceHistoryModel.createIndexes(), AMCSequenceModel.createIndexes(), AuditLogModel.createIndexes()
+    AMCContractModel.createIndexes(), AMCScheduleModel.createIndexes(), AMCServiceHistoryModel.createIndexes(), AMCSequenceModel.createIndexes(), AuditLogModel.createIndexes(), CallingActivityModel.createIndexes(), CallingDailyReportModel.createIndexes()
   ]);
   logger.info('Connected to MongoDB');
 }

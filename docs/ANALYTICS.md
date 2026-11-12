@@ -1,6 +1,6 @@
 # Dashboards and Reports
 
-All endpoints use the existing bearer-token authentication and permission checks. Employee scope is derived from the signed-in employee's hierarchy; callers cannot submit an owner ID to widen that scope. MD and Admin Head dashboard/report permissions are organization-wide. Reports require `reports.read`; dashboard summary requires `dashboard.read`.
+All endpoints use the existing bearer-token authentication and permission checks. Employee scope is derived from the signed-in employee's hierarchy; callers cannot submit an owner ID to widen that scope. MD and MIS dashboard/report permissions are organization-wide. Admin Head is retired. Reports require `reports.read`; dashboard summary requires `dashboard.read`.
 
 ## Endpoints
 
@@ -20,6 +20,8 @@ All routes are under `/api/v1`.
 
 ## Filters
 
-Supported query parameters: `dateFrom`, `dateTo` (ISO dates), `branchId`, `stateId`, `districtId`, one of `mhId`, `dcId`, `rmId`, `cpId`, `leadStatus`, `customerStatus`, `page`, and `limit`. Date bounds are inclusive by day. Geography IDs must exist and related state/district/branch selections must agree. Role selectors must identify the requested role and fall within the caller's hierarchy; out-of-scope selectors return 403.
+Supported query parameters: `dateFrom`, `dateTo` (ISO dates), `branchId`, `stateId`, `districtId`, one of `cpHeadId`, `rmId`, `cpId`, `leadStatus`, `customerStatus`, `page`, and `limit`. Date bounds are inclusive by day. Geography IDs must exist and related state/district/branch selections must agree. Role selectors must identify the requested role and fall within the caller's hierarchy; out-of-scope selectors return 403.
 
 Dashboard and report aggregations apply the employee and geographic scope before grouping. Customer capacity is measured in kW. Quotation value sums the stored project amount. Conversion rate is converted leads divided by scoped leads.
+
+`cpHeadId` selects a Channel Partner Head (`CP_HEAD`). The former `dcId` parameter remains a deprecated alias; supply only one employee selector.

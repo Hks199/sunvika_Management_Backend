@@ -1,3 +1,5 @@
+import { hasOrganizationVisibility } from '../../employees/services/visibility-policy.js';
+import { linkedCustomerLeadIds } from '../../customers/services/customer-linked-access.service.js';
 import { Types } from 'mongoose';
 import { EmployeeModel } from '../../employees/models/employee.model.js';
 import { hierarchyService } from '../../employees/services/hierarchy.service.js';
@@ -10,7 +12,7 @@ import { BranchModel } from '../../geography/models/branch.model.js';
 import { DistrictModel } from '../../geography/models/district.model.js';
 import { StateModel } from '../../geography/models/state.model.js';
 
-type Filters = { dateFrom?: Date; dateTo?: Date; branchId?: string; stateId?: string; districtId?: string; mhId?: string; dcId?: string; rmId?: string; cpId?: string; leadStatus?: string; customerStatus?: string; page?: number; limit?: number };
+type Filters = { dateFrom?: Date; dateTo?: Date; branchId?: string; stateId?: string; districtId?: string; cpHeadId?: string; dcId?: string; rmId?: string; cpId?: string; leadStatus?: string; customerStatus?: string; page?: number; limit?: number };
 
 const id = (value: string) => new Types.ObjectId(value);
 const inDateRange = (field: string, f: Filters) => f.dateFrom || f.dateTo ? { [field]: { ...(f.dateFrom ? { $gte: f.dateFrom } : {}), ...(f.dateTo ? { $lte: new Date(new Date(f.dateTo).setHours(23, 59, 59, 999)) } : {}) } } : {};
@@ -20,11 +22,11 @@ async function scope(actorId: string, f: Filters) {
   const actor = await EmployeeModel.findById(actorId).select('role hierarchyPath').lean();
   if (!actor) throw Object.assign(new Error('Employee not found'), { statusCode: 404 });
   const role = await RoleModel.findById(actor.role).select('code category').lean();
-  const universal = role?.code === 'MD' || role?.category === 'ADMIN_HEAD';
+  const universal = hasOrganizationVisibility(role?.code) || role?.category === 'ADMIN_HEAD';
   let employeeIds: Types.ObjectId[] | null = universal ? null : await hierarchyService.getDownlineEmployeeIds(actorId);
-  const selector = f.cpId ?? f.rmId ?? f.dcId ?? f.mhId;
+  const selector = f.cpId ?? f.rmId ?? f.cpHeadId ?? f.dcId;
   if (selector) {
-    const expectedRole = f.cpId ? 'CP' : f.rmId ? 'RM' : f.dcId ? 'DC' : 'MH';
+    const expectedRole = f.cpId ? 'CP' : f.rmId ? 'RM' : 'CP_HEAD';
     const selected = await EmployeeModel.findById(selector).select('role hierarchyPath').lean();
     const selectedRole = selected ? await RoleModel.findById(selected.role).select('code').lean() : null;
     const actorIsAncestor = selected?.hierarchyPath.some((x) => x.equals(actor._id));
@@ -45,10 +47,10 @@ async function scope(actorId: string, f: Filters) {
     if (district && f.stateId && !district.state.equals(id(f.stateId))) throw Object.assign(new Error('Geography filters do not match'), { statusCode: 400 });
   }
   const leadMatch: Record<string, unknown> = { ...geo, ...inDateRange('createdAt', f) };
-  if (employeeIds) leadMatch.creatorId = { $in: employeeIds };
+  if (employeeIds) leadMatch._id = { $in: await LeadModel.find({ $or: [{ creatorId: { $in: employeeIds } }, { _id: { $in: await linkedCustomerLeadIds(employeeIds) } }] }).distinct('_id') };
   if (f.leadStatus) leadMatch.status = f.leadStatus;
   const customerMatch: Record<string, unknown> = { ...geo, ...inDateRange('createdAt', f) };
-  if (employeeIds) customerMatch.creatorId = { $in: employeeIds };
+  if (employeeIds) customerMatch._id = { $in: await CustomerModel.find({ $or: [{ creatorId: { $in: employeeIds } }, { cpEmployee: { $in: employeeIds } }] }).distinct('_id') };
   if (f.customerStatus) customerMatch.status = f.customerStatus;
   return { actor, role, employeeIds, leadMatch, customerMatch };
 }
@@ -76,7 +78,7 @@ export const analyticsService = {
         { $match: inDateRange('quotationDate', filters) },
         { $lookup: { from: 'leads', localField: 'lead', foreignField: '_id', as: 'leadRecord' } },
         { $unwind: '$leadRecord' },
-        { $match: { ...quotationLeadMatch(s), ...(s.employeeIds ? { 'leadRecord.creatorId': { $in: s.employeeIds } } : {}) } },
+        { $match: { ...quotationLeadMatch(s) } },
         { $group: { _id: null, total: { $sum: { $toDouble: '$totalProjectAmount' } }, count: { $sum: 1 } } }
       ]),
       VisitModel.countDocuments({ ...(s.employeeIds ? { visitedBy: { $in: s.employeeIds } } : {}), ...inDateRange('visitDate', filters) }),
@@ -111,7 +113,7 @@ export const analyticsService = {
         { $match: inDateRange('quotationDate', filters) },
         { $lookup: { from: 'leads', localField: 'lead', foreignField: '_id', as: 'leadRecord' } },
         { $unwind: '$leadRecord' },
-        { $match: { ...quotationLeadMatch(s), ...(s.employeeIds ? { 'leadRecord.creatorId': { $in: s.employeeIds } } : {}) } },
+        { $match: { ...quotationLeadMatch(s) } },
         { $sort: { quotationDate: -1 } }, { $skip: (page - 1) * limit }, { $limit: limit }
       ]);
       return { data: rows, page, limit };

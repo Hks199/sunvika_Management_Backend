@@ -24,7 +24,7 @@ export function resolveAuditResourceId(params: Record<string, unknown>, body: un
 
 export const auditMiddleware: RequestHandler = (req, res, next) => {
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
-  const isSensitiveRead = req.method === 'GET' && /(?:download-url|profile-image-url|\/documents\/)/i.test(req.path);
+  const isSensitiveRead = req.method === 'GET' && /(?:calling-lists\/.*preview|download-url|profile-image-url|\/documents\/)/i.test(req.path);
   if (!isMutation && !isSensitiveRead) return next();
 
   const originalJson = res.json.bind(res);

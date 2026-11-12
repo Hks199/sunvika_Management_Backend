@@ -1,3 +1,7 @@
+import { hasOrganizationVisibility } from './visibility-policy.js';
+import { employeeListFilter, type EmployeeListFilters } from './employee-list-filter.service.js';
+import { EMPLOYEE_DETAIL_REFERENCES } from './employee-reference-populations.js';
+import { employeeDirectoryFilter, type EmployeeDirectory } from './employee-directory.service.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import mongoose, { Types } from 'mongoose';
 import { AppError } from '../../../utils/app-error.util.js';
@@ -36,16 +40,14 @@ async function actorRole(actorId: Types.ObjectId) {
   return role;
 }
 
-async function canCreateRole(actorId: Types.ObjectId, roleCode: string) {
+export async function canCreateRole(actorId: Types.ObjectId, roleCode: string) {
   const creatorRole = await actorRole(actorId);
   if (creatorRole.category === 'ADMIN_HEAD') throw new AppError('Admin Head accounts cannot create employees', 403);
   const targetRole = await RoleModel.findOne({ code: roleCode.toUpperCase(), isActive: true });
-  if (!targetRole) throw new AppError('Selected role is not available', 400);
+  if (!targetRole || ['MH', 'ADMIN_HEAD'].includes(targetRole.code) || targetRole.category === 'ADMIN_HEAD') throw new AppError('Selected role is not available', 400);
+  if (targetRole.code === 'CP_HEAD' && creatorRole.code !== 'MD') throw new AppError('Only MD can create CP Head accounts', 403);
   const isCreatingManagingDirector = creatorRole.code === 'MD' && targetRole.code === 'MD';
-  if (targetRole.category === 'ADMIN_HEAD') {
-    if (!['MD', 'BDO'].includes(creatorRole.code)) throw new AppError('Only MD or BDO can create Admin Head accounts', 403);
-    if (!creatorRole.allowedChildRoles.some((id) => id.equals(targetRole._id))) throw new AppError('Admin Head creation is disabled for your role', 403);
-  } else if (!isCreatingManagingDirector && (creatorRole.category !== 'PRIMARY' || !creatorRole.allowedChildRoles.some((id) => id.equals(targetRole._id)))) {
+  if (!isCreatingManagingDirector && (creatorRole.category !== 'PRIMARY' || !creatorRole.allowedChildRoles.some((id) => id.equals(targetRole._id)))) {
     throw new AppError('You are not allowed to create employees with this role', 403);
   }
   return { creatorRole, targetRole };
@@ -63,12 +65,12 @@ async function getCreatableRoles(actorId: Types.ObjectId) {
       ...(creatorRole.code === 'MD' ? [{ code: 'MD' }] : [])
     ],
     isActive: true,
-    ...(creatorRole.code !== 'MD' && creatorRole.code !== 'BDO' ? { category: { $ne: 'ADMIN_HEAD' } } : {})
+    code: { $nin: ['MH', 'ADMIN_HEAD'] }, category: { $ne: 'ADMIN_HEAD' }
   }).select('_id name code category level').sort({ level: 1, name: 1 }).lean();
   return roles;
 }
 
-async function withHierarchyLock<T>(operation: () => Promise<T>): Promise<T> {
+export async function withHierarchyLock<T>(operation: () => Promise<T>): Promise<T> {
   const owner = randomUUID();
   const now = new Date();
   try {
@@ -138,21 +140,18 @@ export const employeeService = {
     return { employee: toPublicEmployee(employee.toObject() as unknown as Record<string, unknown>), invitationSent };
   },
 
-  async listAccessible(actorId: Types.ObjectId, pagination: PaginationInput) {
+  async listAccessible(actorId: Types.ObjectId, pagination: PaginationInput, directory: EmployeeDirectory = 'all', filters: EmployeeListFilters = {}) {
     const role = await actorRole(actorId);
     let query: Record<string, unknown>;
-    if (role.code === 'MD') query = {};
+    if (hasOrganizationVisibility(role.code)) query = {};
     else if (role.category === 'ADMIN_HEAD') query = { _id: actorId };
     else {
       const scope: Record<string, unknown>[] = [{ _id: actorId }, { hierarchyPath: actorId }];
-      if (role.code === 'BDO') {
-        const adminRole = await RoleModel.findOne({ code: 'ADMIN_HEAD' }).select('_id').lean();
-        if (adminRole) scope.push({ role: adminRole._id, createdBy: { $in: await hierarchyService.getDownlineEmployeeIds(actorId) } });
-      }
       query = { $or: scope };
     }
+    query = { $and: [query, await employeeDirectoryFilter(directory), await employeeListFilter(filters)] };
     const [employees, total] = await Promise.all([
-      EmployeeModel.find(query).select('-passwordHash -failedLoginAttempts -lockedUntil').populate('role', 'name code category level').sort({ createdAt: -1 }).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).lean(),
+      EmployeeModel.find(query).select('-passwordHash -failedLoginAttempts -lockedUntil').populate('role', 'name code category level').populate('reportingTo', 'employeeCode firstName lastName').sort({ createdAt: -1 }).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).lean(),
       EmployeeModel.countDocuments(query)
     ]);
     return { data: employees, meta: createPaginationMeta(pagination.page, pagination.limit, total) };
@@ -160,18 +159,18 @@ export const employeeService = {
 
   async getById(actorId: Types.ObjectId, employeeId: string) {
     const id = validateObjectId(employeeId, 'employee ID');
-    if (!await hierarchyService.canAccessEmployee(actorId, id)) throw new AppError('Employee not found', 404);
-    const employee = await EmployeeModel.findById(id).select('-passwordHash -failedLoginAttempts -lockedUntil').populate('role', 'name code category level').lean();
+    if (!await hierarchyService.canAccessEmployee(actorId, id, 'read')) throw new AppError('Employee not found', 404);
+    const employee = await EmployeeModel.findById(id).select('-passwordHash -failedLoginAttempts -lockedUntil').populate(EMPLOYEE_DETAIL_REFERENCES).lean();
     if (!employee) throw new AppError('Employee not found', 404);
     return employee;
   },
 
-  async getDownline(actorId: Types.ObjectId, pagination: PaginationInput) {
+  async getDownline(actorId: Types.ObjectId, pagination: PaginationInput, directory: EmployeeDirectory = 'all', filters: EmployeeListFilters = {}) {
     const role = await actorRole(actorId);
     if (role.category === 'ADMIN_HEAD') return { data: [], meta: createPaginationMeta(pagination.page, pagination.limit, 0) };
-    const query = role.code === 'MD' ? {} : { hierarchyPath: actorId, isActive: true };
+    const query = { $and: [hasOrganizationVisibility(role.code) ? {} : { hierarchyPath: actorId, isActive: true }, await employeeDirectoryFilter(directory), await employeeListFilter(filters)] };
     const [data, total] = await Promise.all([
-      EmployeeModel.find(query).select('-passwordHash -failedLoginAttempts -lockedUntil').populate('role', 'name code category level').sort({ createdAt: -1 }).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).lean(),
+      EmployeeModel.find(query).select('-passwordHash -failedLoginAttempts -lockedUntil').populate('role', 'name code category level').populate('reportingTo', 'employeeCode firstName lastName').sort({ createdAt: -1 }).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).lean(),
       EmployeeModel.countDocuments(query)
     ]);
     return { data, meta: createPaginationMeta(pagination.page, pagination.limit, total) };
@@ -179,7 +178,7 @@ export const employeeService = {
 
   async getHierarchy(actorId: Types.ObjectId, employeeId: string) {
     const id = validateObjectId(employeeId, 'employee ID');
-    if (!await hierarchyService.canAccessEmployee(actorId, id)) throw new AppError('Employee not found', 404);
+    if (!await hierarchyService.canAccessEmployee(actorId, id, 'read')) throw new AppError('Employee not found', 404);
     return hierarchyService.getReportingChain(id);
   },
 
@@ -218,7 +217,7 @@ export const employeeService = {
     if (!target) throw new AppError('Employee not found', 404);
     if (target._id.equals(actorId)) throw new AppError('You cannot deactivate your own account', 400);
     const role = await RoleModel.findById(target.role).select('code category').lean();
-    if (role?.code === 'MD' || (role?.category === 'ADMIN_HEAD' && !['MD', 'BDO'].includes(actor.code))) throw new AppError('This account cannot be managed by your role', 403);
+    if (role?.code === 'MD' || (role?.category === 'ADMIN_HEAD' && !['MD', 'MIS'].includes(actor.code))) throw new AppError('This account cannot be managed by your role', 403);
     target.isActive = active;
     await target.save();
     if (!active) {
@@ -249,7 +248,8 @@ export const employeeService = {
     if (manager.hierarchyPath.some((id) => id.equals(employeeObjectId))) throw new AppError('Reporting change would create a circular hierarchy', 400);
     const targetRole = await RoleModel.findById(employee.role).select('category code').lean();
     const managerRole = await RoleModel.findById(manager.role);
-    if (!targetRole || !managerRole || targetRole.category === 'ADMIN_HEAD' || targetRole.code === 'MD') {
+    if (targetRole?.code === 'CP_HEAD' && managerRole?.code !== 'MD') throw new AppError('CP Head must report directly to MD', 400);
+    if (!targetRole || !managerRole || !managerRole.isActive || targetRole.code === 'MH' || managerRole.code === 'MH' || targetRole.category === 'ADMIN_HEAD' || targetRole.code === 'MD') {
       throw new AppError('Managing Director and Admin Head accounts do not participate in the reporting hierarchy', 400);
     }
     if (!managerRole.allowedChildRoles.some((id) => id.equals(employee.role))) throw new AppError('The reporting manager is not allowed to manage this role', 400);

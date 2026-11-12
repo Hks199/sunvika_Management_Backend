@@ -1,3 +1,4 @@
+import type { AccessMode } from '../../employees/services/visibility-policy.js';
 import { Types } from 'mongoose';
 import { AppError } from '../../../utils/app-error.util.js';
 import { EmployeeModel } from '../../employees/models/employee.model.js';
@@ -29,11 +30,11 @@ async function createForCustomer(customerId: Types.ObjectId, input: ContractInpu
   return AMCContractModel.create({ customer: customerId, contractNumber: await nextContractNumber(), startDate: input.startDate, expiryDate: input.expiryDate, amount: input.amount, currency: input.currency, createdBy: actorId, ...(assignedEmployee ? { assignedEmployee } : {}), ...(renewalOf ? { renewalOf } : {}) });
 }
 
-async function assertContractAccess(actorId: Types.ObjectId, contractId: string) {
+async function assertContractAccess(actorId: Types.ObjectId, contractId: string, accessMode: AccessMode = 'manage') {
   if (!Types.ObjectId.isValid(contractId)) throw new AppError('AMC contract not found', 404);
   const contract = await AMCContractModel.findById(contractId);
   if (!contract) throw new AppError('AMC contract not found', 404);
-  await assertCustomerAccess(actorId, contract.customer);
+  await assertCustomerAccess(actorId, contract.customer, accessMode);
   return contract;
 }
 
@@ -49,7 +50,7 @@ export const amcService = {
     if (customerIds) query.customer = { $in: customerIds };
     if (filters.customerId) {
       if (!Types.ObjectId.isValid(filters.customerId)) throw new AppError('Customer not found', 404);
-      await assertCustomerAccess(actorId, new Types.ObjectId(filters.customerId));
+      await assertCustomerAccess(actorId, new Types.ObjectId(filters.customerId), 'read');
       query.customer = new Types.ObjectId(filters.customerId);
     }
     if (filters.status) query.status = filters.status;
@@ -59,7 +60,7 @@ export const amcService = {
     return { data, page, limit, total };
   },
   async get(contractId: string, actorId: Types.ObjectId) {
-    const contract = await assertContractAccess(actorId, contractId);
+    const contract = await assertContractAccess(actorId, contractId, 'read');
     const [schedules, serviceHistory] = await Promise.all([AMCScheduleModel.find({ contract: contract._id }).populate('assignedEmployee', 'employeeCode firstName lastName').sort({ scheduledAt: 1 }).lean(), AMCServiceHistoryModel.find({ contract: contract._id }).populate('performedBy', 'employeeCode firstName lastName').sort({ serviceDate: -1 }).lean()]);
     return { contract, schedules, serviceHistory };
   },
@@ -163,7 +164,7 @@ export const amcService = {
     return record;
   },
   async serviceHistory(contractId: string, filters: Pagination, actorId: Types.ObjectId) {
-    const contract = await assertContractAccess(actorId, contractId);
+    const contract = await assertContractAccess(actorId, contractId, 'read');
     const page = filters.page ?? 1, limit = filters.limit ?? 20;
     const [data, total] = await Promise.all([AMCServiceHistoryModel.find({ contract: contract._id }).populate('performedBy', 'employeeCode firstName lastName').sort({ serviceDate: -1 }).skip((page - 1) * limit).limit(limit).lean(), AMCServiceHistoryModel.countDocuments({ contract: contract._id })]);
     return { data, page, limit, total };

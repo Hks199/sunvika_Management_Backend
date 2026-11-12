@@ -15,3 +15,6 @@ export const createDistrict = handler('District created successfully', (req) => 
 export const updateDistrict = handler('District updated successfully', (req) => geographyService.updateDistrict(req.params.districtId as string, req.body));
 export const createBranch = handler('Branch created successfully', (req) => geographyService.createBranch(req.body), 201);
 export const updateBranch = handler('Branch updated successfully', (req) => geographyService.updateBranch(req.params.branchId as string, req.body));
+
+export const listAllDistricts = handler('Districts fetched successfully', () => geographyService.listAllDistricts());
+export const listAllBranches = handler('Branches fetched successfully', (req) => geographyService.listAllBranches(typeof req.query.stateId === 'string' ? req.query.stateId : undefined));

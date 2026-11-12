@@ -1,6 +1,6 @@
 # Annual Maintenance Contracts
 
-AMC records are linked to customers and remain separate from lead workflows. Access to every contract, schedule, and service history is checked through its customer owner and the existing employee hierarchy. MD has organization-wide access. BDO, MH, DC, and RM can register and manage contracts in their hierarchy; CP can register and read their own customer contracts and record service history. Admin Head can read organization-wide AMC data.
+AMC records are linked to customers and remain separate from lead workflows. Access to every contract, schedule, and service history is checked through its customer owner and the existing employee hierarchy. MD has organization-wide access. MIS, CP Head, and RM can register and manage contracts in their hierarchy; CP can register and read their own customer contracts and record service history. Admin Head can read organization-wide AMC data.
 
 All endpoints are mounted under `/api/v1/amc` and use bearer authentication.
 

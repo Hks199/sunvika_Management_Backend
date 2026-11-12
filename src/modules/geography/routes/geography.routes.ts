@@ -1,12 +1,15 @@
+import Joi from 'joi';
 import { Router } from 'express';
 import { authenticate } from '../../../middleware/authenticate.middleware.js';
 import { requireGeographyManagement, requireManagingDirector } from '../../../middleware/authorize.middleware.js';
-import { validateBody } from '../../../middleware/validate.middleware.js';
+import { validateBody, validateQuery } from '../../../middleware/validate.middleware.js';
 import * as controller from '../controllers/geography.controller.js';
 import { createBranchSchema, createDistrictSchema, createStateSchema, updateBranchSchema, updateDistrictSchema, updateStateSchema } from '../validations/geography.validation.js';
 
 export const geographyRouter = Router();
 geographyRouter.use(authenticate);
+geographyRouter.get('/districts', validateQuery(Joi.object({}).unknown(false)), controller.listAllDistricts);
+geographyRouter.get('/branches', validateQuery(Joi.object({ stateId: Joi.string().hex().length(24) }).unknown(false)), controller.listAllBranches);
 geographyRouter.get('/states', controller.listStates);
 geographyRouter.get('/states/:stateId/districts', controller.listDistricts);
 geographyRouter.get('/districts/:districtId/branches', controller.listBranches);

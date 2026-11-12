@@ -1,3 +1,5 @@
+import { announcementRouter } from '../modules/announcements/announcement.routes.js';
+import { queryRouter, notificationRouter } from '../modules/queries/query.routes.js';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { APP_NAME } from '../constants/app.constants.js';
@@ -15,10 +17,18 @@ import { dashboardRouter, reportsRouter } from '../modules/analytics/routes/anal
 import { amcRouter } from '../modules/amc/routes/amc.routes.js';
 import { auditRouter } from '../modules/audit/routes/audit.routes.js';
 
+import { callingReportRouter } from '../modules/calling-reports/calling-report.routes.js';
+import { callingListRouter } from '../modules/calling-lists/calling-list.routes.js';
+
 export const apiRouter = Router();
 
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/announcements', announcementRouter);
+apiRouter.use('/queries', queryRouter);
+apiRouter.use('/notifications', notificationRouter);
 apiRouter.use('/employees', employeeRouter);
+apiRouter.use('/calling-lists', callingListRouter);
+apiRouter.use('/calling-reports', callingReportRouter);
 apiRouter.use('/roles', roleRouter);
 apiRouter.use('/geography', geographyRouter);
 apiRouter.use('/leads', leadRouter);

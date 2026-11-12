@@ -1,3 +1,5 @@
+import { hasOrganizationVisibility, type AccessMode } from '../../employees/services/visibility-policy.js';
+import { linkedCustomerLeadIds, canAccessConvertedLead } from '../../customers/services/customer-linked-access.service.js';
 import { Types } from 'mongoose';
 import { AppError } from '../../../utils/app-error.util.js';
 import { createPaginationMeta, type PaginationInput } from '../../../utils/pagination.util.js';
@@ -17,14 +19,14 @@ async function actorLeadScope(actorId: Types.ObjectId): Promise<Types.ObjectId[]
   const actor = await EmployeeModel.findById(actorId).select('role').lean();
   const role = actor ? await RoleModel.findById(actor.role).select('code category').lean() : null;
   if (!role) throw new AppError('Employee role is unavailable', 403);
-  if (role.code === 'MD' || role.category === 'ADMIN_HEAD') return null;
+  if (hasOrganizationVisibility(role.code) || role.category === 'ADMIN_HEAD') return null;
   const creatorIds = await hierarchyService.getDownlineEmployeeIds(actorId);
-  return LeadModel.find({ creatorId: { $in: creatorIds } }).distinct('_id');
+  return LeadModel.find({ $or: [{ creatorId: { $in: creatorIds } }, { _id: { $in: await linkedCustomerLeadIds(creatorIds) } }] }).distinct('_id');
 }
 
-async function assertLeadAccess(actorId: Types.ObjectId, leadId: Types.ObjectId) {
+async function assertLeadAccess(actorId: Types.ObjectId, leadId: Types.ObjectId, accessMode: AccessMode = 'manage') {
   const lead = await LeadModel.findById(leadId).select('creatorId').lean();
-  if (!lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'visit')) throw new AppError('Lead not found', 404);
+  if (!lead || (!await hierarchyService.canAccessResource(actorId, lead.creatorId, 'visit', accessMode) && !await canAccessConvertedLead(actorId, lead._id))) throw new AppError('Lead not found', 404);
   return lead;
 }
 
@@ -52,7 +54,7 @@ export const visitService = {
     const query: Record<string, unknown> = {};
     if (filters.leadId) {
       const leadId = objectId(filters.leadId, 'lead ID');
-      await assertLeadAccess(actorId, leadId);
+      await assertLeadAccess(actorId, leadId, 'read');
       leadIds = intersectIds(leadIds, [leadId]);
     }
     const branchId = await resolveBranchId(filters.branchId);
@@ -69,7 +71,7 @@ export const visitService = {
     }
     if (filters.employeeId) {
       const employeeId = objectId(filters.employeeId, 'employee ID');
-      if (!await hierarchyService.canAccessResource(actorId, employeeId, 'visit')) throw new AppError('Employee not found', 404);
+      if (!await hierarchyService.canAccessResource(actorId, employeeId, 'visit', 'read')) throw new AppError('Employee not found', 404);
       const existingVisitors = query.visitedBy;
       query.visitedBy = existingVisitors && typeof existingVisitors === 'object' && '$in' in existingVisitors
         ? { $in: (existingVisitors as { $in: Types.ObjectId[] }).$in.filter((id) => id.equals(employeeId)) }
@@ -82,8 +84,8 @@ export const visitService = {
   },
   async get(actorId: Types.ObjectId, visitId: string) {
     const visit = await VisitModel.findById(objectId(visitId, 'visit ID')).populate({ path: 'lead', select: 'leadCode customerName mobileNumber status creatorId' }).populate('visitedBy', 'employeeCode firstName lastName').populate('customer', 'customerCode customerName').lean();
-    const lead = visit?.lead as { creatorId?: Types.ObjectId } | undefined;
-    if (!visit || !lead?.creatorId || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'visit')) throw new AppError('Visit not found', 404);
+    const lead = visit?.lead as { _id: Types.ObjectId; creatorId?: Types.ObjectId } | undefined;
+    if (!visit || !lead?.creatorId || (!await hierarchyService.canAccessResource(actorId, lead.creatorId, 'visit', 'read') && !await canAccessConvertedLead(actorId, lead._id))) throw new AppError('Visit not found', 404);
     return visit;
   },
   async update(actorId: Types.ObjectId, visitId: string, input: { visitDate?: Date; remark?: string; nextVisitDate?: Date | null; location?: { latitude?: number; longitude?: number; address?: string } | null }) {

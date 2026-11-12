@@ -1,3 +1,5 @@
+import { QuotationModel } from '../../quotations/models/quotation.model.js';
+import { AMCContractModel } from '../../amc/models/amc-contract.model.js';
 import { randomBytes } from 'node:crypto';
 import mongoose, { Types } from 'mongoose';
 import { AppError } from '../../../utils/app-error.util.js';
@@ -121,7 +123,7 @@ export const customerService = {
     if (ids) query._id = { $in: ids };
     if (filters.employeeName) {
       const employeeScope = await resolveEmployeeScope(actorId, filters.employeeName, await accessibleEmployeeScope(actorId));
-      if (employeeScope) query.creatorId = { $in: employeeScope };
+      if (employeeScope) query.$and = [{ $or: [{ creatorId: { $in: employeeScope } }, { cpEmployee: { $in: employeeScope } }] }];
     }
     const branchId = await resolveBranchId(filters.branchId);
     if (branchId) query.branch = branchId;
@@ -135,16 +137,18 @@ export const customerService = {
   },
   async get(actorId: Types.ObjectId, customerIdValue: string) {
     const customerId = objectId(customerIdValue, 'customer ID');
-    const customer = await assertCustomerAccess(actorId, customerId);
-    const [documents, lead, leadStatusHistory, visits, activities] = await Promise.all([
+    const customer = await assertCustomerAccess(actorId, customerId, 'read');
+    const [documents, lead, leadStatusHistory, visits, activities, quotations, amcContracts] = await Promise.all([
       CustomerDocumentModel.find({ customer: customer._id }).select('-s3Key').populate('uploadedBy', 'employeeCode firstName lastName').populate('verifiedBy', 'employeeCode firstName lastName').sort({ uploadedAt: -1 }).lean(),
       LeadModel.findById(customer.sourceLead).select('-__v').populate('creatorId', 'employeeCode firstName lastName').lean(),
       LeadStatusHistoryModel.find({ lead: customer.sourceLead }).populate('changedBy', 'employeeCode firstName lastName').sort({ changedAt: -1 }).lean(),
       VisitModel.find({ lead: customer.sourceLead }).populate('visitedBy', 'employeeCode firstName lastName').sort({ visitDate: -1 }).lean(),
-      CustomerActivityModel.find({ customer: customer._id }).populate('actor', 'employeeCode firstName lastName').sort({ occurredAt: -1 }).lean()
+      CustomerActivityModel.find({ customer: customer._id }).populate('actor', 'employeeCode firstName lastName').sort({ occurredAt: -1 }).lean(),
+      QuotationModel.find({ lead: customer.sourceLead }).select('quotationNumber quotationDate customerName totalProjectAmount').sort({ quotationDate: -1 }).lean(),
+      AMCContractModel.find({ customer: customer._id }).select('contractNumber startDate expiryDate status renewalStatus amount').sort({ createdAt: -1 }).lean()
     ]);
     const updatedCustomer = await CustomerModel.findById(customer._id).populate('creatorId', 'employeeCode firstName lastName').populate('updatedBy', 'employeeCode firstName lastName').populate('branch', 'name code').populate('state', 'name code').populate('district', 'name').lean();
-    return { customer: updatedCustomer, sourceLead: lead, documents, leadStatusHistory, visits, activities };
+    return { customer: updatedCustomer, sourceLead: lead, documents, leadStatusHistory, visits, activities, quotations, amcContracts };
   },
   async update(actorId: Types.ObjectId, customerIdValue: string, input: Record<string, string | number>) {
     const customer = await assertCustomerAccess(actorId, objectId(customerIdValue, 'customer ID'));
@@ -157,7 +161,7 @@ export const customerService = {
     return customer;
   },
   async timeline(actorId: Types.ObjectId, customerIdValue: string) {
-    const customer = await assertCustomerAccess(actorId, objectId(customerIdValue, 'customer ID'));
+    const customer = await assertCustomerAccess(actorId, objectId(customerIdValue, 'customer ID'), 'read');
     const [activities, histories, visits] = await Promise.all([
       CustomerActivityModel.find({ customer: customer._id }).populate('actor', 'employeeCode firstName lastName').sort({ occurredAt: -1 }).lean(),
       LeadStatusHistoryModel.find({ lead: customer.sourceLead }).populate('changedBy', 'employeeCode firstName lastName').sort({ changedAt: -1 }).lean(),

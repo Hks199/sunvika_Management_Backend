@@ -1,0 +1,9 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "SunvikaPrivateCallingLists",
+    "Effect": "Allow",
+    "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+    "Resource": "arn:aws:s3:::sunvika-media/calling-lists/*"
+  }]
+}

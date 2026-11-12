@@ -1,3 +1,5 @@
+> Current role policy: Admin Head (ADMIN_HEAD) is retired. Older Admin Head design and test descriptions in this guide are historical. It cannot be seeded, created, authenticated, or selected as an announcement audience. Existing history references are preserved.
+
 # PROJECT: SUNVIKA PRIVATE LIMITED — OFFICE MANAGEMENT & SOLAR BUSINESS MANAGEMENT SYSTEM
 
 ## 1. YOUR ROLE
@@ -280,16 +282,16 @@ Implement a hierarchical employee management system.
 
 The reporting hierarchy is:
 
-MD → BDO → MH → DC → RM → CP
+MD -> CP Head -> RM -> CP
+MIS reports separately to MD.
 
 Role definitions:
 
 1. MD – Managing Director
-2. BDO – Business Development Officer
-3. MH – Marketing Head
-4. DC – District Coordinator
-5. RM – Relationship Manager
-6. CP – Channel Partner
+2. MIS – Management Information System
+3. CP Head – Channel Partner Head
+4. RM – Relationship Manager
+5. CP – Channel Partner
 
 ### MD — Managing Director
 
@@ -297,42 +299,34 @@ Role definitions:
 - Has access to all employees.
 - Can view all leads and customers.
 - Can access all reports and dashboards.
-- Can create BDO.
+- Can create MIS and CP Head.
 - Can create and manage roles and permissions.
 - Can manage districts, states, and branches.
 - Can manage the entire organization.
 - Can view all downline employee activities.
 - Can access all business records.
 
-### BDO — Business Development Officer
+### MIS — Management Information System
 
 - Reports to MD.
 - Can access all data belonging to their downline.
-- Can create MH.
+- Can create Admin Head; CP Head reports directly to MD.
 - Can create employees under their permitted hierarchy.
 - Can manage leads and customers under their hierarchy.
 - Can access their team's dashboards and reports.
 - Can manage Admin Head accounts.
-- Cannot access unrelated BDO teams or their data.
+- Cannot access unrelated MIS teams or their data.
 
-### MH — Marketing Head
+### CP Head — Channel Partner Head
 
-- Reports to BDO.
-- Can create DC.
-- Can view and manage all employees under their hierarchy.
-- Can access all their downline leads and customers.
-- Can monitor employee performance.
-
-### DC — District Coordinator
-
-- Reports to MH.
+- Reports directly to MD.
 - Can create RM.
 - Can access all downline employees.
 - Can monitor their team's leads, customers, visits, and performance.
 
 ### RM — Relationship Manager
 
-- Reports to DC.
+- Reports to CP Head.
 - Can create CP.
 - Can access all their downline CP employees.
 - Can monitor their leads, visits, customers, and performance.
@@ -403,17 +397,16 @@ Example:
 
 ```text
 MD
- └── BDO
-      └── MH
-           └── DC
-                └── RM
-                     └── CP
+ |-- MIS
+ +-- CP Head
+      +-- RM
+           +-- CP
 ```
 
 For a CP employee, the hierarchy path should contain:
 
 ```text
-[MD_ID, BDO_ID, MH_ID, DC_ID, RM_ID]
+[MD_ID, CP_HEAD_ID, RM_ID]
 ```
 
 For an MD, the path can be empty.
@@ -530,9 +523,8 @@ Having `leads.read` permission does not automatically mean an employee can read 
 For example:
 
 - MD can read all leads.
-- BDO can read leads belonging to their downline.
-- MH can read leads belonging to their downline.
-- DC can read leads belonging to their downline.
+- MIS can read leads belonging to their downline.
+- CP Head can read leads belonging to their downline.
 - RM can read leads belonging to their downline.
 - CP can read only their own leads.
 
@@ -564,7 +556,7 @@ Use permission versioning or cache invalidation when role permissions change.
 
 Admin Head is a special role outside the primary reporting hierarchy.
 
-Admin Head is not a child of MH, DC, RM, or CP.
+Admin Head is not a child of CP Head, RM, or CP.
 
 ### Access
 
@@ -578,18 +570,18 @@ Admin Head is not a child of MH, DC, RM, or CP.
 
 ### Restrictions
 
-- Cannot access MD or BDO employee-management privileges.
+- Cannot access MD or MIS employee-management privileges.
 - Cannot manage the organizational hierarchy.
 - Cannot automatically access every system configuration.
 - Cannot modify roles or permissions unless explicitly authorized.
 
 ### Creation
 
-Only MD and BDO can create Admin Head accounts.
+Only MD and MIS can create Admin Head accounts.
 
 Admin Head data visibility should be restricted according to their assigned permissions, not the regular employee reporting hierarchy.
 
-MD and BDO can view and manage Admin Head activities.
+MD and MIS can view and manage Admin Head activities.
 
 Create a separate authorization policy for Admin Head.
 
@@ -599,7 +591,7 @@ Create a separate authorization policy for Admin Head.
 
 All roles must log in through the same authentication system and API.
 
-There must be no separate login system for MD, BDO, MH, DC, RM, CP, or Admin Head.
+There must be no separate login system for MD, MIS, CP Head, RM, CP, or Admin Head.
 
 ### Employee Registration Flow
 
@@ -1118,9 +1110,8 @@ Do not create separate authentication systems for different roles.
 Show:
 
 - Total Employees
-- Total BDO
-- Total MH
-- Total DC
+- Total MIS
+- Total CP Head
 - Total RM
 - Total CP
 - Total Leads
@@ -1138,15 +1129,11 @@ Show:
 - Employee Performance
 - Lead Conversion Rate
 
-### BDO Dashboard
+### MIS Dashboard
 
 Show information for their own hierarchy.
 
-### MH Dashboard
-
-Show information for their downline.
-
-### DC Dashboard
+### CP Head Dashboard
 
 Show information for their downline.
 
@@ -1181,8 +1168,7 @@ Provide reusable filtering functionality:
 - Branch
 - State
 - District
-- MH
-- DC
+- CP Head
 - RM
 - CP
 - Lead Status
@@ -1722,9 +1708,8 @@ Priority test cases:
 ### Hierarchy
 
 - MD can access all downline data.
-- BDO can access only their own hierarchy.
-- MH can access only their own hierarchy.
-- DC can access only their own hierarchy.
+- MIS can access only their own hierarchy.
+- CP Head can access only their own hierarchy.
 - RM can access their CP employees.
 - CP cannot access another CP's data.
 - Unrelated employees cannot access each other's resources.
@@ -1733,7 +1718,7 @@ Priority test cases:
 ### Admin Head
 
 - MD can create Admin Head.
-- BDO can create Admin Head.
+- MIS can create Admin Head.
 - Other roles cannot create Admin Head.
 - Admin Head can view authorized leads and customers.
 - Admin Head cannot access unauthorized employee-management operations.

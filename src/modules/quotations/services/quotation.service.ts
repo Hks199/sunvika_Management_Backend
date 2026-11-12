@@ -1,3 +1,5 @@
+import { hasOrganizationVisibility, type AccessMode } from '../../employees/services/visibility-policy.js';
+import { linkedCustomerLeadIds, canAccessConvertedLead } from '../../customers/services/customer-linked-access.service.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../../../config/env.config.js';
@@ -7,6 +9,7 @@ import { hierarchyService } from '../../employees/services/hierarchy.service.js'
 import { EmployeeModel } from '../../employees/models/employee.model.js';
 import { LeadModel } from '../../leads/models/lead.model.js';
 import { CustomerModel } from '../../customers/models/customer.model.js';
+import { roleService } from '../../roles/services/role.service.js';
 import { RoleModel } from '../../roles/models/role.model.js';
 import { QuotationModel } from '../models/quotation.model.js';
 import { QuotationSequenceModel } from '../models/quotation-sequence.model.js';
@@ -30,14 +33,14 @@ async function leadScope(actorId: Types.ObjectId): Promise<Types.ObjectId[] | nu
   const employee = await EmployeeModel.findById(actorId).select('role').lean();
   const role = employee ? await RoleModel.findById(employee.role).select('code category').lean() : null;
   if (!role) throw new AppError('Employee role is unavailable', 403);
-  if (role.code === 'MD' || role.category === 'ADMIN_HEAD') return null;
+  if (hasOrganizationVisibility(role.code) || role.category === 'ADMIN_HEAD') return null;
   const ids = await hierarchyService.getDownlineEmployeeIds(actorId);
-  return LeadModel.find({ creatorId: { $in: ids } }).distinct('_id');
+  return LeadModel.find({ $or: [{ creatorId: { $in: ids } }, { _id: { $in: await linkedCustomerLeadIds(ids) } }] }).distinct('_id');
 }
-async function assertQuotationAccess(actorId: Types.ObjectId, quoteId: string) {
+async function assertQuotationAccess(actorId: Types.ObjectId, quoteId: string, accessMode: AccessMode = 'manage') {
   const quote = await QuotationModel.findById(parseId(quoteId, 'quotation ID'));
   const lead = quote ? await LeadModel.findById(quote.lead).select('creatorId').lean() : null;
-  if (!quote || !lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'quotation')) throw new AppError('Quotation not found', 404);
+  if (!quote || !lead || (!await hierarchyService.canAccessResource(actorId, lead.creatorId, 'quotation', accessMode) && !await canAccessConvertedLead(actorId, lead._id))) throw new AppError('Quotation not found', 404);
   return { quote, lead };
 }
 async function nextNumber(prefix: 'QTN' | 'BR'): Promise<string> {
@@ -68,7 +71,7 @@ interface QuotationInput {
 export const quotationService = {
   async create(actorId: Types.ObjectId, input: QuotationInput) {
     const lead = await LeadModel.findById(parseId(input.leadId, 'lead ID'));
-    if (!lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'quotation')) throw new AppError('Lead not found', 404);
+    if (!lead || (!await hierarchyService.canAccessResource(actorId, lead.creatorId, 'quotation') && !await canAccessConvertedLead(actorId, lead._id))) throw new AppError('Lead not found', 404);
     if (lead.status !== 'QUOTATION_SENT') throw new AppError('A quotation can only be generated for a lead with QUOTATION_SENT status', 409);
     const capacity = Number(input.requiredCapacityKW.toFixed(3));
     const rate = Number(input.ratePerKW.toFixed(2));
@@ -112,7 +115,7 @@ export const quotationService = {
     if (filters.employeeName) {
       const accessibleEmployees = await accessibleEmployeeScope(actorId);
       const employeeIds = await resolveEmployeeScope(actorId, filters.employeeName, accessibleEmployees);
-      const leadQuery: Record<string, unknown> = { creatorId: { $in: employeeIds ?? [] } };
+      const leadQuery: Record<string, unknown> = { $or: [{ creatorId: { $in: employeeIds ?? [] } }, { _id: { $in: await linkedCustomerLeadIds(employeeIds ?? []) } }] };
       if (leadIds) leadQuery._id = { $in: leadIds };
       leadIds = await LeadModel.find(leadQuery).distinct('_id');
     }
@@ -127,7 +130,7 @@ export const quotationService = {
     if (filters.leadId) {
       const leadObjectId = parseId(filters.leadId, 'lead ID');
       const lead = await LeadModel.findById(leadObjectId).select('creatorId').lean();
-      if (!lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'quotation')) throw new AppError('Lead not found', 404);
+      if (!lead || (!await hierarchyService.canAccessResource(actorId, lead.creatorId, 'quotation', 'read') && !await canAccessConvertedLead(actorId, lead._id))) throw new AppError('Lead not found', 404);
       query.lead = leadIds
         ? { $in: leadIds.filter((id) => id.equals(leadObjectId)) }
         : leadObjectId;
@@ -140,16 +143,16 @@ export const quotationService = {
     return { data, meta: createPaginationMeta(pagination.page, pagination.limit, total) };
   },
   async get(actorId: Types.ObjectId, quoteId: string) {
-    const { quote } = await assertQuotationAccess(actorId, quoteId);
+    const { quote } = await assertQuotationAccess(actorId, quoteId, 'read');
     return publicQuotation(quote.toObject() as unknown as Record<string, unknown>);
   },
   async downloadUrl(actorId: Types.ObjectId, quoteId: string) {
-    const { quote } = await assertQuotationAccess(actorId, quoteId);
+    const { quote } = await assertQuotationAccess(actorId, quoteId, 'read');
     const url = await quotationStorageService.downloadUrl(quote.s3Key, `${quote.quotationNumber}.pdf`);
     return { url, expiresInSeconds: 300 };
   },
   async downloadFile(actorId: Types.ObjectId, quoteId: string) {
-    const { quote } = await assertQuotationAccess(actorId, quoteId);
+    const { quote } = await assertQuotationAccess(actorId, quoteId, 'read');
     return { body: await quotationStorageService.download(quote.s3Key), fileName: `${quote.quotationNumber}.pdf` };
   },
   async generateBrochure(actorId: Types.ObjectId) {
@@ -169,6 +172,7 @@ export const quotationService = {
     return { url: await quotationStorageService.downloadUrl(brochure.s3Key, `${brochure.brochureCode}.pdf`), expiresInSeconds: 300 };
   },
   async shareQuotation(actorId: Types.ObjectId, quoteId: string, mobileNumber: string, brochureId?: string) {
+    if (!await roleService.hasPermission(actorId, 'quotations.share')) throw new AppError('You do not have permission to send quotations', 403);
     const phone = whatsappNumber(mobileNumber);
     const { quote } = await assertQuotationAccess(actorId, quoteId);
     let brochureLink: { url: string; expiresAt: Date } | undefined;
@@ -194,7 +198,7 @@ export const quotationService = {
     return { whatsappUrl: whatsappUrl(phone, `Sunvika Private Limited solar brochure: ${shareLink.url}`), expiresAt: shareLink.expiresAt, deliveryStatus: 'NOT_SENT' as const };
   },
   async shareHistory(actorId: Types.ObjectId, quoteId: string) {
-    const { quote } = await assertQuotationAccess(actorId, quoteId);
+    const { quote } = await assertQuotationAccess(actorId, quoteId, 'read');
     return QuotationShareModel.find({ quotation: quote._id }).populate('sharedBy', 'employeeCode firstName lastName').sort({ linkCreatedAt: -1 }).lean();
   },
   async publicShare(token: string) {

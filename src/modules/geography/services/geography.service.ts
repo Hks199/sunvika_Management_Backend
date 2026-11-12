@@ -20,6 +20,15 @@ export const geographyService = {
       if (!await BranchModel.exists({ _id: branch, state, district, isActive: true })) throw new AppError('Select an active branch belonging to the selected state and district', 400);
     }
   },
+  listAllDistricts: async () => {
+    const states = await StateModel.find({ isActive: true }).distinct('_id');
+    return DistrictModel.find({ state: { $in: states }, isActive: true }).sort({ name: 1 }).select('name state isActive').lean();
+  },
+  listAllBranches: async (stateValue?: string) => {
+    const states = await StateModel.find({ isActive: true, ...(stateValue ? { _id: id(stateValue, 'state ID') } : {}) }).distinct('_id');
+    const districts = await DistrictModel.find({ state: { $in: states }, isActive: true }).distinct('_id');
+    return BranchModel.find({ state: { $in: states }, district: { $in: districts }, isActive: true }).sort({ name: 1 }).select('name code state district isActive').lean();
+  },
   listStates: () => StateModel.find({ isActive: true }).sort({ name: 1 }).select('name code isActive').lean(),
   listDistricts: async (stateId: string) => {
     const state = id(stateId, 'state ID');

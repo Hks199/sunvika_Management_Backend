@@ -1,3 +1,5 @@
+import type { EmployeeListFilters } from '../services/employee-list-filter.service.js';
+import type { EmployeeDirectory } from '../services/employee-directory.service.js';
 import type { RequestHandler } from 'express';
 import { employeeService } from '../services/employee.service.js';
 import { sendSuccess } from '../../../utils/api-response.util.js';
@@ -58,8 +60,8 @@ export const getProfileImageUrl: RequestHandler = async (req, res, next) => {
 
 export const list: RequestHandler = async (req, res, next) => {
   try {
-    const pagination = res.locals.validatedQuery as { page: number; limit: number };
-    const result = await employeeService.listAccessible(actorId(req), pagination);
+    const pagination = res.locals.validatedQuery as EmployeeListFilters & { page: number; limit: number; directory: EmployeeDirectory };
+    const result = await employeeService.listAccessible(actorId(req), pagination, pagination.directory, pagination);
     return res.status(200).json({ success: true, message: 'Employees fetched successfully', ...result });
   }
   catch (error) { return next(error); }
@@ -67,8 +69,8 @@ export const list: RequestHandler = async (req, res, next) => {
 
 export const downline: RequestHandler = async (req, res, next) => {
   try {
-    const pagination = res.locals.validatedQuery as { page: number; limit: number };
-    const result = await employeeService.getDownline(actorId(req), pagination);
+    const pagination = res.locals.validatedQuery as EmployeeListFilters & { page: number; limit: number; directory: EmployeeDirectory };
+    const result = await employeeService.getDownline(actorId(req), pagination, pagination.directory, pagination);
     return res.status(200).json({ success: true, message: 'Downline employees fetched successfully', ...result });
   }
   catch (error) { return next(error); }

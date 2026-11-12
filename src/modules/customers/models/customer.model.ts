@@ -1,6 +1,9 @@
 import { Schema, model } from 'mongoose';
 
 const customerSchema = new Schema({
+  cpEmployee: { type: Schema.Types.ObjectId, ref: 'Employee', index: true },
+  cpConvertedAt: Date,
+  cpConvertedBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
   customerCode: { type: String, required: true, unique: true, uppercase: true, trim: true },
   sourceLead: { type: Schema.Types.ObjectId, ref: 'Lead', required: true, unique: true },
   customerName: { type: String, required: true, trim: true, maxlength: 160 },

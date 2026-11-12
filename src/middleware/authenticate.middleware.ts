@@ -21,7 +21,7 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     }
     const employee = await EmployeeModel.findOne({ _id: claims.sub, isActive: true }).select('role').lean();
     if (!employee) throw new AppError('Account is unavailable', 401);
-    if (!await RoleModel.exists({ _id: employee.role, isActive: true })) throw new AppError('Employee role is unavailable', 401);
+    if (!await RoleModel.exists({ _id: employee.role, isActive: true, code: { $ne: 'ADMIN_HEAD' }, category: { $ne: 'ADMIN_HEAD' } })) throw new AppError('Employee role is unavailable', 401);
     const session = await RefreshTokenModel.exists({ employee: claims.sub, familyId: claims.sid, revokedAt: null, expiresAt: { $gt: new Date() } });
     if (!session) throw new AppError('Session has been revoked', 401);
     req.auth = { employeeId: new Types.ObjectId(claims.sub), sessionId: claims.sid };

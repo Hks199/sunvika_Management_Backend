@@ -1,0 +1,17 @@
+import { Router, type RequestHandler } from 'express';
+import Joi from 'joi';
+import { authenticate } from '../../middleware/authenticate.middleware.js';
+import { validateBody, validateQuery } from '../../middleware/validate.middleware.js';
+import { sendSuccess } from '../../utils/api-response.util.js';
+import { callingReportService as service } from './calling-report.service.js';
+import { indiaDay } from './calling-report.policy.js';
+export const callingReportQuerySchema=Joi.object({period:Joi.string().valid('DAY','WEEK','MONTH').default('DAY'),date:Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).default(()=>indiaDay()),rmId:Joi.string().hex().length(24)}).unknown(false);
+export const verifyCallingReportSchema=Joi.object({revision:Joi.number().integer().min(1).required(),reviewNote:Joi.string().trim().max(1000).allow('').default('')}).unknown(false);
+export const callingReportRouter=Router();
+callingReportRouter.use(authenticate);
+callingReportRouter.use((_req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
+const route=(work:(req:Parameters<RequestHandler>[0],res:Parameters<RequestHandler>[1])=>Promise<unknown>):RequestHandler=>async(req,res,next)=>{try{await work(req,res);}catch(error){next(error);}};
+callingReportRouter.get('/options',route(async(req,res)=>sendSuccess(res,'Calling report options',await service.options(req.auth!.employeeId))));
+callingReportRouter.get('/',validateQuery(callingReportQuerySchema),route(async(req,res)=>{const q=res.locals.validatedQuery;return sendSuccess(res,'Calling activity report',await service.summary(req.auth!.employeeId,q.period,q.date,q.rmId));}));
+callingReportRouter.post('/today',validateBody(Joi.object({rmId:Joi.string().hex().length(24)}).unknown(false)),route(async(req,res)=>sendSuccess(res,'Today calling report generated',await service.generateToday(req.auth!.employeeId,req.body.rmId))));
+callingReportRouter.post('/:reportId/verify',validateBody(verifyCallingReportSchema),route(async(req,res)=>sendSuccess(res,'Calling report verified',await service.verify(req.auth!.employeeId,String(req.params.reportId),req.body.revision,req.body.reviewNote))));
