@@ -3,6 +3,7 @@ import { Schema, model } from 'mongoose';
 const uploadSchema = new Schema({
   customer: { type: Schema.Types.ObjectId, ref: 'Customer', index: true },
   lead: { type: Schema.Types.ObjectId, ref: 'Lead', index: true },
+  cpEmployee: { type: Schema.Types.ObjectId, ref: 'Employee', index: true },
   owner: { type: Schema.Types.ObjectId, ref: 'Employee', required: true, index: true },
   documentType: { type: String, required: true, enum: ['PAN', 'AADHAAR', 'ELECTRICITY_BILL', 'BANK_PASSBOOK'] },
   fileName: { type: String, required: true, trim: true, maxlength: 180 },
@@ -15,8 +16,8 @@ const uploadSchema = new Schema({
 }, { timestamps: true, strict: 'throw' });
 
 uploadSchema.pre('validate', function validateOwner(next) {
-  if (Boolean(this.customer) === Boolean(this.lead)) {
-    next(new Error('A document upload must belong to exactly one customer or lead'));
+  if ([this.customer, this.lead, this.cpEmployee].filter(Boolean).length !== 1) {
+    next(new Error('A document upload must belong to exactly one customer, lead or channel partner'));
     return;
   }
   next();

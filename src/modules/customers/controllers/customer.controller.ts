@@ -42,6 +42,17 @@ export const documentDownloadUrl = handler('Customer document download URL creat
 export const documentPreviewUrl = handler('Customer document preview URL created', (req) => customerDocumentService.previewUrl(actorId(req), req.params.customerId as string, req.params.documentId as string));
 export const verifyDocument = handler('Customer document verification updated', (req) => customerDocumentService.verify(actorId(req), req.params.customerId as string, req.params.documentId as string, req.body.status, req.body.remark));
 
+import { cpCustomerService } from '../services/cp-customer.service.js';
 import { customerCpService } from '../services/customer-cp.service.js';
 export const cpConversionOptions = handler('Customer CP conversion options', (req) => customerCpService.options(actorId(req), req.params.customerId as string));
 export const convertToCp = handler('Customer converted to CP', (req) => customerCpService.convert(actorId(req), req.params.customerId as string, req.body));
+
+export const cpCustomerOptions = handler('CP customer conversion options', req => cpCustomerService.options(actorId(req), req.params.cpId as string));
+export const convertCpToCustomer = handler('Channel partner converted to customer', req => cpCustomerService.convert(actorId(req), req.params.cpId as string, req.body), 201);
+export const createCpCustomerUploads = handler('Customer document uploads reserved', req => customerDocumentService.createLeadConversionUploadUrls(actorId(req), req.params.cpId as string, req.body.documents, 'cp'), 201);
+export const uploadCpCustomerDocument: RequestHandler = async (req, res, next) => {
+  try {
+    if (!Buffer.isBuffer(req.body)) throw new AppError('Upload a document with its matching Content-Type', 400);
+    return sendSuccess(res, 'Customer document uploaded', await customerDocumentService.uploadLeadConversionDocument(actorId(req), req.params.cpId as string, req.params.uploadId as string, req.get('Content-Type') ?? '', req.body, 'cp'));
+  } catch (error) { return next(error); }
+};

@@ -1521,3 +1521,16 @@ test('calling-list filters intersect visibility and use inclusive IST upload dat
   const {canReadCallingList,canConvertCallingCandidate}=await import('../dist/modules/calling-lists/calling-list.policy.js');
   assert.equal(canReadCallingList('CP_HEAD','head','mis','rm',true),true);assert.equal(canReadCallingList('CP_HEAD','head','mis','rm',false),false);assert.equal(canReadCallingList('CP_HEAD','head','mis',null,true),false);assert.equal(canConvertCallingCandidate('CP_HEAD','head','rm'),false);
 });
+
+test('CP-to-customer conversion requires complete customer details, four documents and explicit confirmation', async () => {
+  const { cpCustomerSchema } = await import('../dist/modules/customers/services/cp-customer.service.js');
+  const id = '0123456789abcdef01234567';
+  const input = { customerName: 'Fixture CP', mobileNumber: '9876543210', siteAddress: '1 Main Road', branch: id, state: id, district: id,
+    requiredCapacityKW: 3, ratePerKW: 40000, paymentMode: 'Cash', panelBrand: 'Fixture', panelTechnology: 'Mono', remark: 'Customer conversion',
+    documentUploadIds: ['0123456789abcdef01234561', '0123456789abcdef01234562', '0123456789abcdef01234563', '0123456789abcdef01234564'], confirmed: true };
+  assert.equal(cpCustomerSchema.validate(input).error, undefined);
+  for (const key of Object.keys(input)) { const incomplete = { ...input }; delete incomplete[key]; assert.ok(cpCustomerSchema.validate(incomplete).error, key); }
+  for (const confirmed of [false, 'true', 1]) assert.ok(cpCustomerSchema.validate({ ...input, confirmed }).error);
+  assert.ok(cpCustomerSchema.validate({ ...input, documentUploadIds: Array(4).fill(id) }).error);
+  assert.ok(cpCustomerSchema.validate({ ...input, requiredCapacityKW: 0.01 }).error);
+});

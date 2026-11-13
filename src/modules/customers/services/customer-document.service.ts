@@ -1,3 +1,4 @@
+import { assertCpCustomerAccess } from './cp-customer-access.service.js';
 import { randomUUID } from 'node:crypto';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -44,10 +45,21 @@ function parseId(value: string, label: string): Types.ObjectId {
   return new Types.ObjectId(value);
 }
 
+async function conversionSubject(actorId: Types.ObjectId, value: string, subject: 'lead' | 'cp') {
+  const parsed = parseId(value, subject === 'cp' ? 'CP ID' : 'lead ID');
+  if (subject === 'cp') {
+    const cp = await assertCpCustomerAccess(actorId, value);
+    if (cp.sourceCustomer) throw new AppError('This CP is already a customer', 409);
+    return { cpEmployee: cp._id };
+  }
+  const lead = await LeadModel.findById(parsed).select('creatorId');
+  if (!lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'lead')) throw new AppError('Lead not found', 404);
+  return { lead: lead._id };
+}
+
 export const customerDocumentService = {
-  async createLeadConversionUploadUrls(actorId: Types.ObjectId, leadId: string, documents: Array<{ documentType: CustomerDocumentType; fileName: string; mimeType: string; fileSize: number }>) {
-    const lead = await LeadModel.findById(parseId(leadId, 'lead ID')).select('creatorId');
-    if (!lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'lead')) throw new AppError('Lead not found', 404);
+  async createLeadConversionUploadUrls(actorId: Types.ObjectId, leadId: string, documents: Array<{ documentType: CustomerDocumentType; fileName: string; mimeType: string; fileSize: number }>, subject: 'lead' | 'cp' = 'lead') {
+    const scope = await conversionSubject(actorId, leadId, subject);
     if (documents.length !== CUSTOMER_DOCUMENT_TYPES.length || new Set(documents.map(({ documentType }) => documentType)).size !== CUSTOMER_DOCUMENT_TYPES.length || CUSTOMER_DOCUMENT_TYPES.some((type) => !documents.some((document) => document.documentType === type))) {
       throw new AppError('Upload exactly one of each required customer document: PAN, AADHAAR, ELECTRICITY_BILL, and BANK_PASSBOOK', 400);
     }
@@ -59,9 +71,9 @@ export const customerDocumentService = {
     return Promise.all(documents.map(async (input) => {
       const ext = MIME_EXTENSIONS.get(input.mimeType);
       if (!ext) throw new AppError('Only PDF, JPEG, PNG, and WebP documents are accepted', 400);
-      const key = `customer-document-staging/${lead._id.toString()}/${randomUUID()}.${ext}`;
+      const key = `customer-document-staging/${leadId}/${randomUUID()}.${ext}`;
       const expiresAt = new Date(Date.now() + UPLOAD_TTL_SECONDS * 1000);
-      const upload = await CustomerDocumentUploadModel.create({ lead: lead._id, owner: actorId, documentType: input.documentType, fileName: safeFileName(input.fileName), key, contentType: input.mimeType, size: input.fileSize, expiresAt, status: 'PENDING' });
+      const upload = await CustomerDocumentUploadModel.create({ ...scope, owner: actorId, documentType: input.documentType, fileName: safeFileName(input.fileName), key, contentType: input.mimeType, size: input.fileSize, expiresAt, status: 'PENDING' });
       try {
         return { uploadId: upload._id.toString(), documentType: input.documentType, expiresAt };
       } catch (error) {
@@ -70,16 +82,15 @@ export const customerDocumentService = {
       }
     }));
   },
-  async uploadLeadConversionDocument(actorId: Types.ObjectId, leadId: string, uploadId: string, contentType: string, bytes: Uint8Array) {
+  async uploadLeadConversionDocument(actorId: Types.ObjectId, leadId: string, uploadId: string, contentType: string, bytes: Uint8Array, subject: 'lead' | 'cp' = 'lead') {
     const parsedLeadId = parseId(leadId, 'lead ID');
     const parsedUploadId = parseId(uploadId, 'document upload ID');
-    const lead = await LeadModel.findById(parsedLeadId).select('creatorId');
-    if (!lead || !await hierarchyService.canAccessResource(actorId, lead.creatorId, 'lead')) throw new AppError('Lead not found', 404);
+    const scope = await conversionSubject(actorId, leadId, subject);
     if (!MIME_EXTENSIONS.has(contentType)) throw new AppError('Only PDF, JPEG, PNG, and WebP documents are accepted', 400);
     if (bytes.byteLength < 1 || bytes.byteLength > env.customerDocumentMaxSizeBytes) throw new AppError('Document size exceeds the configured limit', 400);
     const upload = await CustomerDocumentUploadModel.findOne({
       _id: parsedUploadId,
-      lead: parsedLeadId,
+      ...scope,
       owner: actorId,
       contentType,
       size: bytes.byteLength,
@@ -104,7 +115,7 @@ export const customerDocumentService = {
         ContentLength: bytes.byteLength,
         ContentType: contentType,
         ServerSideEncryption: 'AES256',
-        Metadata: { lead: parsedLeadId.toString(), uploader: actorId.toString() }
+        Metadata: { [subject === 'cp' ? 'cp' : 'lead']: parsedLeadId.toString(), uploader: actorId.toString() }
       }));
       const completed = await CustomerDocumentUploadModel.updateOne(
         { _id: claimed._id, status: 'UPLOADING' },
@@ -136,13 +147,14 @@ export const customerDocumentService = {
       throw new AppError(`Customer document upload failed in storage (${errorCode}). Check backend logs and retry with a new upload.`, 503);
     }
   },
-  async prepareLeadConversionUploads(actorId: Types.ObjectId, leadId: Types.ObjectId, uploadIds: string[]) {
+  async prepareLeadConversionUploads(actorId: Types.ObjectId, leadId: Types.ObjectId, uploadIds: string[], subject: 'lead' | 'cp' = 'lead') {
+    const scope = subject === 'cp' ? { cpEmployee: leadId } : { lead: leadId };
     if (uploadIds.length !== CUSTOMER_DOCUMENT_TYPES.length || uploadIds.some((id) => !Types.ObjectId.isValid(id)) || new Set(uploadIds).size !== CUSTOMER_DOCUMENT_TYPES.length) {
       throw new AppError('Upload one file for each required customer document before conversion', 400);
     }
     const uploads = await CustomerDocumentUploadModel.find({
       _id: { $in: uploadIds },
-      lead: leadId,
+      ...scope,
       owner: actorId,
       status: 'PENDING',
       uploadedAt: { $ne: null },
@@ -153,7 +165,7 @@ export const customerDocumentService = {
       throw new AppError('Upload one file for each required customer document: PAN, AADHAAR, ELECTRICITY_BILL, and BANK_PASSBOOK', 400);
     }
     const claimed = await CustomerDocumentUploadModel.updateMany(
-      { _id: { $in: uploads.map((upload) => upload._id) }, lead: leadId, owner: actorId, status: 'PENDING', uploadedAt: { $ne: null }, expiresAt: { $gt: new Date() } },
+      { _id: { $in: uploads.map((upload) => upload._id) }, ...scope, owner: actorId, status: 'PENDING', uploadedAt: { $ne: null }, expiresAt: { $gt: new Date() } },
       { $set: { status: 'VERIFYING' } }
     );
     if (claimed.modifiedCount !== CUSTOMER_DOCUMENT_TYPES.length) throw new AppError('Document uploads have expired or are already being used; upload them again', 409);
@@ -195,7 +207,7 @@ export const customerDocumentService = {
         description: `${upload.documentType} document uploaded`,
         actor: actorId
       })), { session, ordered: true });
-      await CustomerDocumentUploadModel.updateMany({ _id: { $in: uploads.map((upload) => upload._id) }, status: 'VERIFYING' }, { $set: { status: 'COMPLETED', customer: customerId }, $unset: { lead: 1 } }, { session });
+      await CustomerDocumentUploadModel.updateMany({ _id: { $in: uploads.map((upload) => upload._id) }, status: 'VERIFYING' }, { $set: { status: 'COMPLETED', customer: customerId }, $unset: { lead: 1, cpEmployee: 1 } }, { session });
       return;
     }
     await CustomerDocumentModel.create(documentData);
@@ -205,7 +217,7 @@ export const customerDocumentService = {
       description: `${upload.documentType} document uploaded`,
       actor: actorId
     })));
-    await CustomerDocumentUploadModel.updateMany({ _id: { $in: uploads.map((upload) => upload._id) }, status: 'VERIFYING' }, { $set: { status: 'COMPLETED', customer: customerId }, $unset: { lead: 1 } });
+    await CustomerDocumentUploadModel.updateMany({ _id: { $in: uploads.map((upload) => upload._id) }, status: 'VERIFYING' }, { $set: { status: 'COMPLETED', customer: customerId }, $unset: { lead: 1, cpEmployee: 1 } });
   },
   async revokeLeadConversionUploads(uploads: Array<InstanceType<typeof CustomerDocumentUploadModel>>) {
     await CustomerDocumentUploadModel.updateMany({ _id: { $in: uploads.map((upload) => upload._id) }, status: 'VERIFYING' }, { $set: { status: 'REVOKED' } });

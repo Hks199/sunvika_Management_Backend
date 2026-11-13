@@ -120,3 +120,10 @@ test('calling daily reports and upline verification require authentication',asyn
     const response=await fetch(`${baseUrl}/api/v1${path}`,{method});assert.equal(response.status,401,`${method} ${path}`);
   }
 });
+
+test('CP-to-customer options, uploads and conversion reject unauthenticated requests', async () => {
+  const root = '/customers/from-cp/0123456789abcdef01234567';
+  for (const [method, path] of [['GET', `${root}/options`], ['POST', `${root}/document-upload-urls`], ['PUT', `${root}/document-uploads/0123456789abcdef01234568`], ['POST', root]]) {
+    assert.equal((await fetch(`${baseUrl}/api/v1${path}`, { method })).status, 401);
+  }
+});

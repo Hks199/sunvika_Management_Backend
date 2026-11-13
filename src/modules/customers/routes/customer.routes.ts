@@ -9,8 +9,14 @@ import { completeDocumentUploadSchema, convertLeadSchema, createDocumentUploadSc
 
 import { customerCpSchema } from '../services/customer-cp.service.js';
 
+import { cpCustomerSchema } from '../services/cp-customer.service.js';
+
 export const customerRouter = Router();
 customerRouter.use(authenticate);
+customerRouter.get('/from-cp/:cpId/options', requirePermission('customers.create'), controller.cpCustomerOptions);
+customerRouter.post('/from-cp/:cpId/document-upload-urls', requirePermission('customers.create'), validateBody(createLeadConversionUploadsSchema), controller.createCpCustomerUploads);
+customerRouter.put('/from-cp/:cpId/document-uploads/:uploadId', requirePermission('customers.create'), express.raw({ type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'], limit: env.customerDocumentMaxSizeBytes }), controller.uploadCpCustomerDocument);
+customerRouter.post('/from-cp/:cpId', requirePermission('customers.create'), validateBody(cpCustomerSchema), controller.convertCpToCustomer);
 customerRouter.get('/:customerId/cp-conversion', requirePermission('customers.read'), requirePermission('employees.create'), controller.cpConversionOptions);
 customerRouter.post('/:customerId/convert-to-cp', requirePermission('customers.read'), requirePermission('employees.create'), validateBody(customerCpSchema), controller.convertToCp);
 customerRouter.post('/from-lead/:leadId/document-upload-urls', requirePermission('customers.create'), validateBody(createLeadConversionUploadsSchema), controller.createLeadConversionUploadUrls);
