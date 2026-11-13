@@ -1,4 +1,8 @@
 import mongoose from 'mongoose';
+import {upgradeReminderScheduleIndexes} from '../modules/cp-reminders/cp-reminders.migration.js';
+import {CP_REMINDER_MODELS} from '../modules/cp-reminders/cp-reminders.model.js';
+import { CallingBatchModel, CallingAllocationModel, CallingDistributionSettingsModel } from '../modules/calling-lists/calling-bulk.model.js';
+import { CallingListModel, CallingCandidateModel } from '../modules/calling-lists/calling-list.model.js';
 import { CallingActivityModel, CallingDailyReportModel } from '../modules/calling-reports/calling-report.models.js';
 import { env } from '../config/env.config.js';
 import { logger } from '../services/logger.service.js';
@@ -30,14 +34,17 @@ export async function connectDatabase(): Promise<void> {
     maxPoolSize: env.mongoMaxPoolSize,
     autoIndex: env.nodeEnv !== 'production'
   });
-  await Promise.all([CallingActivityModel.init(), CallingDailyReportModel.init()]);
+  await Promise.all([CallingActivityModel.init(), CallingDailyReportModel.init(), CallingBatchModel.init(), CallingAllocationModel.init(), CallingDistributionSettingsModel.init(), CallingListModel.init(), CallingCandidateModel.init()]);
   if (env.nodeEnv === 'production') await Promise.all([
+    CallingBatchModel.createIndexes(), CallingAllocationModel.createIndexes(), CallingDistributionSettingsModel.createIndexes(), CallingListModel.createIndexes(), CallingCandidateModel.createIndexes(),
     StateModel.createIndexes(), DistrictModel.createIndexes(), BranchModel.createIndexes(),
     LeadModel.createIndexes(), LeadStatusHistoryModel.createIndexes(), VisitModel.createIndexes(),
     CustomerModel.createIndexes(), CustomerDocumentModel.createIndexes(), CustomerDocumentUploadModel.createIndexes(), CustomerActivityModel.createIndexes(),
     QuotationModel.createIndexes(), QuotationSequenceModel.createIndexes(), BrochureModel.createIndexes(), PublicShareLinkModel.createIndexes(), QuotationShareModel.createIndexes(),
     AMCContractModel.createIndexes(), AMCScheduleModel.createIndexes(), AMCServiceHistoryModel.createIndexes(), AMCSequenceModel.createIndexes(), AuditLogModel.createIndexes(), CallingActivityModel.createIndexes(), CallingDailyReportModel.createIndexes()
   ]);
+  await upgradeReminderScheduleIndexes();
+  await Promise.all(CP_REMINDER_MODELS.map(model=>env.nodeEnv==='production'?model.createIndexes():model.init()));
   logger.info('Connected to MongoDB');
 }
 

@@ -1,5 +1,8 @@
 import { Schema, model } from 'mongoose';
 const listSchema = new Schema({
+  candidateStorage: { type: String, enum: ['S3', 'DATABASE'], default: 'DATABASE' },
+  batch: { type: Schema.Types.ObjectId, ref: 'CallingBatch' }, part: Number,
+  assignmentSource: { type: String, enum: ['MANUAL', 'AUTO'] },
   title: { type: String, required: true, maxlength: 160 },
   fileName: { type: String, required: true, maxlength: 180 },
   uploadedBy: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
@@ -8,7 +11,7 @@ const listSchema = new Schema({
   assignedAt: Date,
   bucket: { type: String, required: true, select: false },
   key: { type: String, required: true, select: false },
-  state: { type: String, enum: ['RESERVED', 'UPLOADING', 'READY'], default: 'RESERVED', required: true },
+  state: { type: String, enum: ['RESERVED', 'UPLOADING', 'STAGED', 'READY'], default: 'RESERVED', required: true },
   expiresAt: Date,
   busy: { type: Boolean, default: false },
   headers: [{ type: String }],
@@ -20,6 +23,8 @@ const listSchema = new Schema({
 }, { timestamps: true, strict: 'throw' });
 listSchema.index({ uploadedBy: 1, state: 1, createdAt: -1 });
 listSchema.index({ assignedTo: 1, state: 1, createdAt: -1 });
+listSchema.index({ batch: 1, part: 1 }, { unique: true, partialFilterExpression: { batch: { $type: 'objectId' } } });
+listSchema.index({ candidateStorage: 1, state: 1, assignedTo: 1, createdAt: 1 });
 export const CallingListModel = model('CallingList', listSchema);
 const rowSchema = new Schema({
   list: { type: Schema.Types.ObjectId, ref: 'CallingList', required: true },

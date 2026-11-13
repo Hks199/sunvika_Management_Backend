@@ -947,6 +947,10 @@ test('query seen operations only clear the viewer notifications for visible mess
   const { RoleModel } = await import('../dist/modules/roles/models/role.model.js');
   const { QueryThreadModel, QueryNotificationModel } = await import('../dist/modules/queries/query.models.js');
   const { queryService } = await import('../dist/modules/queries/query.service.js');
+  const {CpReminderNotificationModel}=await import('../dist/modules/cp-reminders/cp-reminders.model.js');
+  t.mock.method(CpReminderNotificationModel,'findOneAndUpdate',()=>chain(null));
+  t.mock.method(CpReminderNotificationModel,'countDocuments',async()=>0);
+  t.mock.method(QueryNotificationModel,'aggregate',async pipeline=>{assert.equal(String(pipeline[0].$match.recipient),String(viewer));return [];});
   const viewer=new Types.ObjectId(),head=new Types.ObjectId(),threadId=new Types.ObjectId(),messageId=new Types.ObjectId(),notificationId=new Types.ObjectId();
   const chain=value=>{const q={select:()=>q,sort:()=>q,skip:()=>q,limit:()=>q,lean:async()=>value};return q;};
   t.mock.method(EmployeeModel,'findOne',()=>chain({role:new Types.ObjectId()}));
@@ -1533,4 +1537,63 @@ test('CP-to-customer conversion requires complete customer details, four documen
   for (const confirmed of [false, 'true', 1]) assert.ok(cpCustomerSchema.validate({ ...input, confirmed }).error);
   assert.ok(cpCustomerSchema.validate({ ...input, documentUploadIds: Array(4).fill(id) }).error);
   assert.ok(cpCustomerSchema.validate({ ...input, requiredCapacityKW: 0.01 }).error);
+});
+
+test('bulk calling workbook splits 101 entries into 50, 50 and 1, retaining headers and text', async () => {
+  const { default: ExcelJS } = await import('exceljs');
+  const { splitCallingWorkbook, buildCallingSheet } = await import('../dist/modules/calling-lists/calling-bulk.excel.js');
+  const { parseCallingWorkbook } = await import('../dist/modules/calling-lists/calling-list.excel.js');
+  const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('Candidates'); sheet.addRow(['Name','Mobile']);
+  for(let i=0;i<101;i++)sheet.addRow([`Candidate ${i}`,'0123456789']);
+  const parts=[];
+  const result=await splitCallingWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()),async(headers,rows,part,count)=>{
+    const parsed=await parseCallingWorkbook(await buildCallingSheet(headers,rows));
+    assert.deepEqual(parsed.headers,['Name','Mobile']);assert.equal(parsed.rows[0].values[1],'0123456789');
+    parts.push({length:parsed.rows.length,part,count,first:parsed.rows[0].values[0]});
+  });
+  assert.deepEqual(result,{candidateCount:101,sheetCount:3});assert.deepEqual(parts.map(p=>p.length),[50,50,1]);
+  assert.deepEqual(parts.map(p=>p.first),['Candidate 0','Candidate 50','Candidate 100']);
+  const extra=workbook.addWorksheet('Extra');extra.addRow(['Name']);extra.addRow(['Candidate']);
+  await assert.rejects(splitCallingWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()),async()=>{}),/exactly one worksheet/);
+});
+test('daily distribution starts at precisely 09:30 IST independently of server timezone', async () => {
+  const { dailyDistributionTime } = await import('../dist/modules/calling-lists/calling-bulk.service.js');
+  assert.deepEqual(dailyDistributionTime(new Date('2026-11-13T03:59:59Z')),{day:'2026-11-13',due:false});
+  assert.deepEqual(dailyDistributionTime(new Date('2026-11-13T04:00:00Z')),{day:'2026-11-13',due:true});
+  assert.deepEqual(dailyDistributionTime(new Date('2026-11-13T18:30:00Z')),{day:'2026-11-14',due:false});
+});
+
+test('daily allocation settings reject the retired quantity setting', async () => {
+  const {distributionSchema} = await import('../dist/modules/calling-lists/calling-list.routes.js');
+  const input = {enabled:true,skipUnfinished:false};
+  assert.equal(distributionSchema.validate(input).error,undefined);
+  assert.ok(distributionSchema.validate({...input,sheetsPerRm:2}).error);
+});
+
+test('CP reminder timing respects IST, send-day interval, duration, windows and missed-slot grace',async()=>{
+  const {dueReminderSlot,reminderEndDate,reminderSchema}=await import('../dist/modules/cp-reminders/cp-reminders.policy.js');
+  const input={title:'Daily focus',body:'Follow up with your leads.',enabled:true,startDate:'2026-11-13',durationDays:3,everyDays:2,time:'09:30',repeatMinutes:0,endTime:''};
+  assert.equal(reminderSchema.validate(input).error,undefined);
+  assert.equal(dueReminderSlot(input,new Date('2026-11-13T03:59:59Z')),null);
+  assert.equal(dueReminderSlot(input,new Date('2026-11-13T04:00:00Z')).slot,'2026-11-13T09:30');
+  assert.equal(dueReminderSlot(input,new Date('2026-11-13T04:05:00Z')),null);
+  assert.equal(dueReminderSlot(input,new Date('2026-11-14T04:00:00Z')),null);
+  assert.equal(dueReminderSlot(input,new Date('2026-11-15T04:00:00Z')).slot,'2026-11-15T09:30');
+  assert.equal(dueReminderSlot(input,new Date('2026-11-17T04:00:00Z')),null);
+  assert.equal(reminderEndDate(input),'2026-11-15');
+  const repeat={...input,everyDays:1,repeatMinutes:30,endTime:'11:00'};
+  assert.equal(reminderSchema.validate(repeat).error,undefined);
+  assert.equal(dueReminderSlot(repeat,new Date('2026-11-13T05:00:00Z')).slot,'2026-11-13T10:30');
+  assert.equal(dueReminderSlot(repeat,new Date('2026-11-13T05:31:00Z')).slot,'2026-11-13T11:00');
+  assert.equal(dueReminderSlot(repeat,new Date('2026-11-13T06:00:00Z')),null);
+  for(const invalid of [{durationDays:0},{everyDays:0},{startDate:'2026-02-30'},{time:'24:00'},{repeatMinutes:1},{repeatMinutes:15,endTime:''},{repeatMinutes:15,endTime:'08:00'},{body:'x'.repeat(501)},{rm:'injected'}])assert.ok(reminderSchema.validate({...input,...invalid}).error,JSON.stringify(invalid));
+});
+test('only RM, their CP Head and MD may control an RM notification schedule',async()=>{
+  const {canControlRm}=await import('../dist/modules/cp-reminders/cp-reminders.policy.js');
+  assert.equal(canControlRm('RM','rm','rm',['md','head']),true);
+  assert.equal(canControlRm('RM','other','rm',['md','head']),false);
+  assert.equal(canControlRm('CP_HEAD','head','rm',['md','head']),true);
+  assert.equal(canControlRm('CP_HEAD','other','rm',['md','head']),false);
+  assert.equal(canControlRm('MD','md','rm',[]),true);
+  for(const role of ['MIS','CP','MH','ADMIN_HEAD'])assert.equal(canControlRm(role,'head','rm',['head']),false);
 });

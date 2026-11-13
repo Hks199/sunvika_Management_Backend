@@ -127,3 +127,14 @@ test('CP-to-customer options, uploads and conversion reject unauthenticated requ
     assert.equal((await fetch(`${baseUrl}/api/v1${path}`, { method })).status, 401);
   }
 });
+
+test('bulk upload queue, retry and distribution settings require authentication', async () => {
+  for(const [method,path] of [['GET','/batches'],['POST','/batches'],['PUT','/batches/0123456789abcdef01234567/file'],['POST','/batches/0123456789abcdef01234567/retry'],['GET','/distribution'],['PATCH','/distribution']]) {
+    assert.equal((await fetch(`${baseUrl}/api/v1/calling-lists${path}`,{method})).status,401);
+  }
+});
+
+test('CP reminder schedules, history and push device registration require authentication',async()=>{
+  const id='0123456789abcdef01234567';
+  for(const [method,path] of [['GET','/cp-reminders'],['GET','/cp-reminders/managers'],['POST',`/cp-reminders/${id}`],['PATCH',`/cp-reminders/schedules/${id}`],['DELETE',`/cp-reminders/schedules/${id}`],['GET',`/cp-reminders/${id}/history`],['POST','/push-devices'],['POST','/push-devices/unregister']])assert.equal((await fetch(`${baseUrl}/api/v1${path}`,{method})).status,401);
+});

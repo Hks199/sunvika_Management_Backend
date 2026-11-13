@@ -8,12 +8,14 @@ import { createEmployeeSchema } from '../employees/validations/employee.validati
 import { callingListService as service } from './calling-list.service.js';
 import { reportRange } from '../calling-reports/calling-report.policy.js';
 import { EXCEL_TYPE, MAX_EXCEL_SIZE } from './calling-list.excel.js';
+import { assertCallingBatchAdministrator, callingBulkService } from './calling-bulk.service.js';
+import { MAX_BULK_SIZE } from './calling-bulk.excel.js';
 export const callingListRouter = Router();
 callingListRouter.use(authenticate);
 callingListRouter.use((_req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
 const pageSchema = Joi.object({ page: Joi.number().integer().min(1).default(1), limit: Joi.number().integer().min(1).max(100).default(25) });
 const filterDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).custom((value,helpers)=>{try{reportRange('DAY',value);return value;}catch{return helpers.error('any.invalid');}});
-export const callingListQuerySchema = pageSchema.keys({rmId:Joi.string().hex().length(24),dateFrom:filterDate,dateTo:filterDate}).unknown(false).custom((value,helpers)=>value.dateFrom&&value.dateTo&&value.dateFrom>value.dateTo?helpers.error('any.invalid'):value);
+export const callingListQuerySchema = pageSchema.keys({rmId:Joi.string().hex().length(24),dateFrom:filterDate,dateTo:filterDate,assignmentState:Joi.string().valid('assigned','unassigned')}).unknown(false).custom((value,helpers)=>value.dateFrom&&value.dateTo&&value.dateFrom>value.dateTo?helpers.error('any.invalid'):value);
 export const reserveCallingListSchema = Joi.object({ title: Joi.string().trim().min(1).max(160).required(), fileName: Joi.string().max(180).pattern(/[\x00-\x1f]/, { invert: true }).pattern(/^[^\\/\r\n]+\.xlsx$/i).required(), size: Joi.number().integer().min(22).max(MAX_EXCEL_SIZE).required(), assignedTo: Joi.string().hex().length(24) });
 export const deleteCallingCandidateSchema = Joi.object({ confirm: Joi.boolean().valid(true).required() }).unknown(false);
 export const candidateStatusSchema = Joi.object({
@@ -25,6 +27,16 @@ const assignSchema = Joi.object({ assignedTo: Joi.string().hex().length(24).allo
 const cpSchema = createEmployeeSchema.fork(['roleCode'], schema => schema.valid('CP').default('CP'));
 const route = (work: (req: express.Request, res: express.Response) => Promise<unknown>): RequestHandler => async (req, res, next) => { try { await work(req, res); } catch (error) { next(error); } };
 const param = (value: unknown) => String(value ?? '');
+const batchAdministrator: RequestHandler = async(req,_res,next)=>{try{await assertCallingBatchAdministrator(req.auth!.employeeId);next();}catch(error){next(error);}};
+callingListRouter.use(['/batches','/distribution'],batchAdministrator);
+const bulkReserveSchema = Joi.object({title:Joi.string().trim().min(1).max(140).required(),fileName:Joi.string().max(180).pattern(/^[^\\/\r\n]+\.xlsx$/i).required(),size:Joi.number().integer().min(22).max(MAX_BULK_SIZE).required()}).unknown(false);
+export const distributionSchema=Joi.object({enabled:Joi.boolean().strict().required(),skipUnfinished:Joi.boolean().strict().required()}).unknown(false);
+callingListRouter.get('/distribution',route(async(req,res)=>sendSuccess(res,'Daily distribution settings',await callingBulkService.settings(req.auth!.employeeId))));
+callingListRouter.patch('/distribution',validateBody(distributionSchema),route(async(req,res)=>sendSuccess(res,'Distribution settings saved',await callingBulkService.saveSettings(req.auth!.employeeId,req.body))));
+callingListRouter.get('/batches',validateQuery(pageSchema),route(async(req,res)=>{const q=res.locals.validatedQuery;return sendSuccess(res,'Upload batches',await callingBulkService.list(req.auth!.employeeId,q.page,q.limit));}));
+callingListRouter.post('/batches',validateBody(bulkReserveSchema),route(async(req,res)=>sendSuccess(res,'Batch upload reserved',await callingBulkService.reserve(req.auth!.employeeId,req.body),201)));
+callingListRouter.put('/batches/:batchId/file',express.raw({type:[EXCEL_TYPE,'application/octet-stream'],limit:MAX_BULK_SIZE}),route(async(req,res)=>sendSuccess(res,'Workbook queued for splitting',await callingBulkService.upload(req.auth!.employeeId,param(req.params.batchId),req.body),202)));
+callingListRouter.post('/batches/:batchId/retry',route(async(req,res)=>sendSuccess(res,'Batch queued for retry',await callingBulkService.retry(req.auth!.employeeId,param(req.params.batchId)))));
 callingListRouter.get('/template', route(async (req, res) => sendSuccess(res, 'Blank CP candidate Excel template', await service.template(req.auth!.employeeId))));
 callingListRouter.get('/managers', route(async (req, res) => sendSuccess(res, 'Active RMs', await service.managers(req.auth!.employeeId))));
 callingListRouter.get('/filter-options', route(async (req,res)=>sendSuccess(res,'Accessible assigned RMs',await service.filterOptions(req.auth!.employeeId))));

@@ -1,3 +1,4 @@
+import { assignStoredCallingSheet } from './calling-sheet-assignment.js';
 import { canFilterCallingLists, callingListScope, filterCallingLists, type CallingListFilters } from './calling-list-filters.js';
 import { callingActivity } from '../calling-reports/calling-activity.service.js';
 import { callingListCounts } from './calling-list-counts.js';
@@ -30,12 +31,12 @@ async function accessible(actorId: Types.ObjectId, listId: string, manage = fals
   const code = await actor(actorId);
   const list = await CallingListModel.findById(listId).select('+bucket +key');
   const downline = code === 'CP_HEAD' && list?.assignedTo ? Boolean(await EmployeeModel.exists({ _id: list.assignedTo, hierarchyPath: actorId })) : false;
-  const allowed = list && (manage ? canManageCallingList(code, String(actorId), String(list.uploadedBy))
-    : canReadCallingList(code, String(actorId), String(list.uploadedBy), list.assignedTo ? String(list.assignedTo) : null, downline));
+  const allowed = list && ((code === 'MIS' && Boolean(list.batch)) || (manage ? canManageCallingList(code, String(actorId), String(list.uploadedBy))
+    : canReadCallingList(code, String(actorId), String(list.uploadedBy), list.assignedTo ? String(list.assignedTo) : null, downline)));
   if (!list || !allowed) throw new AppError('Calling list not found', 404);
   return { list, code };
 }
-const publicFields = 'title fileName uploadedBy assignedTo assignedAt rowCount originalRowCount deletedConvertedCount deletedCalledCount headers size state createdAt updatedAt';
+const publicFields = 'candidateStorage batch part assignmentSource title fileName uploadedBy assignedTo assignedAt rowCount originalRowCount deletedConvertedCount deletedCalledCount headers size state createdAt updatedAt';
 export const callingListService = {
   async template(actorId: Types.ObjectId) {
     const code = await actor(actorId);
@@ -84,8 +85,8 @@ export const callingListService = {
     let stored = false;
     try {
       await callingListStorage.put(list.bucket, list.key, bytes); stored = true;
-      await CallingCandidateModel.insertMany(parsed.rows.map(row => ({ list: list._id, ...row })));
-      await CallingListModel.updateOne({ _id: list._id, state: 'UPLOADING' }, { $set: { state: 'READY', headers: parsed.headers, rowCount: parsed.rows.length, originalRowCount: parsed.rows.length, deletedConvertedCount: 0 }, $unset: { expiresAt: 1 } });
+      if (list.assignedTo) await CallingCandidateModel.insertMany(parsed.rows.map(row => ({ list: list._id, ...row })));
+      await CallingListModel.updateOne({ _id: list._id, state: 'UPLOADING' }, { $set: { state: 'READY', candidateStorage: list.assignedTo ? 'DATABASE' : 'S3', headers: parsed.headers, rowCount: parsed.rows.length, originalRowCount: parsed.rows.length, deletedConvertedCount: 0 }, $unset: { expiresAt: 1 } });
       return { _id: list._id, rowCount: parsed.rows.length };
     } catch (error) {
       await CallingCandidateModel.deleteMany({ list: list._id });
@@ -97,14 +98,22 @@ export const callingListService = {
   async assign(actorId: Types.ObjectId, listId: string, assignedTo: string | null) {
     const { list } = await accessible(actorId, listId, true);
     if (assignedTo) await relationshipManager(assignedTo);
+    if (list.candidateStorage === 'S3') {
+      if (!assignedTo) return { _id: list._id, assignedTo: null };
+      return assignStoredCallingSheet(list._id, new Types.ObjectId(assignedTo), actorId);
+    }
     const updated = await CallingListModel.findOneAndUpdate({ _id: list._id, state: 'READY', busy: false },
-      { $set: { assignedTo, assignedBy: actorId, assignedAt: new Date() } }, { new: true }).select(publicFields);
+      { $set: { assignedTo, assignedBy: actorId, assignedAt: new Date(), assignmentSource: 'MANUAL' } }, { new: true }).select(publicFields);
     if (!updated) throw new AppError('Calling list is not ready or a CP account is being created. Retry shortly', 409);
     return updated;
   },
   async preview(actorId: Types.ObjectId, listId: string, page: number, limit: number) {
     const { list } = await accessible(actorId, listId);
     if (list.state !== 'READY') throw new AppError('Calling list is not ready', 409);
+    if (list.candidateStorage === 'S3') {
+      const parsed = await parseCallingWorkbook(await callingListStorage.read(list.bucket, list.key));
+      return { _id: list._id, title: list.title, headers: parsed.headers, rows: parsed.rows.slice((page-1)*limit,page*limit).map(row => ({ ...row, _id: `s3-${row.rowNumber}`, callStatus: 'NOT_CALLED' })), total: parsed.rows.length, page, limit, readOnly: true };
+    }
     const rows = await CallingCandidateModel.find({ list: list._id }).select('rowNumber values employee callStatus callNote nextFollowUpAt lastCalledAt').sort({ rowNumber: 1 }).skip((page - 1) * limit).limit(limit).lean();
     return { _id: list._id, title: list.title, headers: list.headers, rows, total: list.rowCount, page, limit };
   },
@@ -115,6 +124,7 @@ export const callingListService = {
   },
   async updateCandidateStatus(actorId: Types.ObjectId, listId: string, rowId: string, input: { callStatus: string; callNote?: string; nextFollowUpAt?: Date | null }) {
     const { list, code } = await accessible(actorId, listId);
+    if (list.candidateStorage === 'S3') throw new AppError('Assign this sheet to an RM before recording or deleting candidates',409);
     if (code === 'CP_HEAD') throw new AppError('CP Head has read-only access to calling lists',403);
     if (!Types.ObjectId.isValid(rowId)) throw new AppError('Candidate not found', 404);
     const locked = await CallingListModel.findOneAndUpdate({ _id: list._id, assignedTo: list.assignedTo, busy: false, state: 'READY' }, { $set: { busy: true } });
@@ -138,6 +148,7 @@ export const callingListService = {
   async deleteCandidate(actorId: Types.ObjectId, listId: string, rowId: string, confirmed: boolean) {
     if (confirmed !== true) throw new AppError('Confirm permanent candidate deletion first', 400);
     const { list, code } = await accessible(actorId, listId);
+    if (list.candidateStorage === 'S3') throw new AppError('Assign this sheet to an RM before recording or deleting candidates',409);
     if (code === 'CP_HEAD') throw new AppError('CP Head has read-only access to calling lists',403);
     if (!Types.ObjectId.isValid(rowId)) throw new AppError('Candidate not found', 404);
     const locked = await CallingListModel.findOneAndUpdate({ _id: list._id, assignedTo: list.assignedTo, busy: false, state: 'READY' }, { $set: { busy: true } });

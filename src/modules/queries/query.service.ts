@@ -5,6 +5,7 @@ import { AppError } from '../../utils/app-error.util.js';
 import { createPaginationMeta, type PaginationInput } from '../../utils/pagination.util.js';
 import { QueryThreadModel, QueryMessageModel, QueryNotificationModel } from './query.models.js';
 import { QUERY_ROLES, canRaiseQuery, canAccessQuery, notificationRecipients } from './query.policy.js';
+import {CpReminderNotificationModel} from '../cp-reminders/cp-reminders.model.js';
 const personFields = 'firstName middleName lastName employeeCode';
 function id(value: string) { if (!Types.ObjectId.isValid(value)) throw new AppError('Invalid query or notification ID', 400); return new Types.ObjectId(value); }
 async function actor(actorId: Types.ObjectId) {
@@ -86,18 +87,18 @@ export const queryService = {
   },
   async notifications(actorId: Types.ObjectId, pagination: PaginationInput) {
     await actor(actorId);
-    const filter = { recipient: actorId };
-    const [items, total, unreadCount] = await Promise.all([
-      QueryNotificationModel.find(filter).sort({ createdAt: -1, _id: -1 }).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).lean(),
-      QueryNotificationModel.countDocuments(filter),
-      QueryNotificationModel.countDocuments({ ...filter, readAt: null })
+    const filter={recipient:actorId};
+    const [items,queries,reminders,unreadQueries,unreadReminders]=await Promise.all([
+      QueryNotificationModel.aggregate([{$match:filter},{$unionWith:{coll:CpReminderNotificationModel.collection.name,pipeline:[{$match:filter}]}},{$sort:{createdAt:-1,_id:-1}},{$skip:(pagination.page-1)*pagination.limit},{$limit:pagination.limit}]),
+      QueryNotificationModel.countDocuments(filter),CpReminderNotificationModel.countDocuments(filter),
+      QueryNotificationModel.countDocuments({...filter,readAt:null}),CpReminderNotificationModel.countDocuments({...filter,readAt:null})
     ]);
-    return { items, unreadCount, meta: createPaginationMeta(pagination.page, pagination.limit, total) };
+    return {items,unreadCount:unreadQueries+unreadReminders,meta:createPaginationMeta(pagination.page,pagination.limit,queries+reminders)};
   },
   async readNotification(actorId: Types.ObjectId, notificationId: string) {
     await actor(actorId);
-    const result = await QueryNotificationModel.findOneAndUpdate({ _id: id(notificationId), recipient: actorId }, { $set: { readAt: new Date() } }, { new: true }).lean();
+    const result = await QueryNotificationModel.findOneAndUpdate({ _id: id(notificationId), recipient: actorId }, { $set: { readAt: new Date() } }, { new: true }).lean() ?? await CpReminderNotificationModel.findOneAndUpdate({ _id: id(notificationId), recipient: actorId }, { $set: { readAt: new Date() } }, { new: true }).lean();
     if (!result) throw new AppError('Notification not found', 404);
-    return { thread: result.thread };
+    return 'thread' in result ? { thread: result.thread } : result;
   }
 };

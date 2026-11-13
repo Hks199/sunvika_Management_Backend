@@ -5,7 +5,7 @@ import { CallingCandidateModel, CallingListModel } from './calling-list.model.js
 import { parseCallingWorkbook } from './calling-list.excel.js';
 import { callingListStorage } from './calling-list.storage.js';
 
-type List = { _id: Types.ObjectId; rowCount: number; originalRowCount?: number | null | undefined; deletedCalledCount?: number | null | undefined; deletedConvertedCount?: number | null | undefined; bucket?: string | null | undefined; key?: string | null | undefined };
+type List = { candidateStorage?: string | null | undefined; _id: Types.ObjectId; rowCount: number; originalRowCount?: number | null | undefined; deletedCalledCount?: number | null | undefined; deletedConvertedCount?: number | null | undefined; bucket?: string | null | undefined; key?: string | null | undefined };
 /** Count the entire list, independent of the current preview page. */
 export async function callingListCounts<T extends List>(lists: T[], session?: ClientSession) {
   if (!lists.length) return [];
@@ -30,11 +30,11 @@ export async function callingListCounts<T extends List>(lists: T[], session?: Cl
       } catch (error) { logger.warn({ err: error, listId: list._id }, 'Original calling-list count could not be recovered'); }
     }
     const count = byList.get(String(list._id));
-    const retained = count?.remaining ?? 0, converted = count?.converted ?? 0;
+    const retained = list.candidateStorage === 'S3' ? list.rowCount : count?.remaining ?? 0, converted = count?.converted ?? 0;
     const convertedCount = converted + (deletedConvertedCount ?? 0);
     const deletedCount = originalRowCount === null ? null : Math.max(0, originalRowCount - retained);
     return { ...publicList, originalRowCount, convertedCount, unconvertedCount: retained - converted,
-      calledCount: (count?.called ?? converted) + (deletedCalledCount ?? 0), interestedCount: count?.interested ?? 0, followUpCount: count?.followUp ?? 0, notCalledCount: count?.notCalled ?? 0,
+      calledCount: (count?.called ?? converted) + (deletedCalledCount ?? 0), interestedCount: count?.interested ?? 0, followUpCount: count?.followUp ?? 0, notCalledCount: list.candidateStorage === 'S3' ? list.rowCount : count?.notCalled ?? 0,
       deletedCount, totalCallingCount: callingTotal(deletedCount, convertedCount, count?.interested ?? 0, count?.followUp ?? 0) };
   }));
 }

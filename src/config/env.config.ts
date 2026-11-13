@@ -20,6 +20,7 @@ const schema = Joi.object({
   SMTP_PASSWORD: Joi.string().allow('').default(''),
   SMTP_FROM: Joi.string().allow('').default(''),
   BCRYPT_SALT_ROUNDS: Joi.number().integer().min(10).max(15).default(12),
+  EXPO_PUSH_ACCESS_TOKEN: Joi.string().allow('').default(''),
   AWS_REGION: Joi.string().allow('').default(''),
   AWS_S3_BUCKET_NAME: Joi.string().allow('').default(''),
   AWS_S3_PROFILE_BUCKET: Joi.string().allow('').default(''),
@@ -68,6 +69,7 @@ if (value.NODE_ENV === 'production') {
 const origins = (value.CORS_ORIGINS as string).split(',').map((origin) => origin.trim()).filter(Boolean);
 
 export const env = Object.freeze({
+  expoPushAccessToken: value.EXPO_PUSH_ACCESS_TOKEN as string,
   nodeEnv: value.NODE_ENV as 'development' | 'test' | 'production',
   port: value.PORT as number,
   apiPrefix: (value.API_PREFIX as string).replace(/\/$/, ''),

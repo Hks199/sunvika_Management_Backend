@@ -20,7 +20,10 @@ import { auditRouter } from '../modules/audit/routes/audit.routes.js';
 import { callingReportRouter } from '../modules/calling-reports/calling-report.routes.js';
 import { callingListRouter } from '../modules/calling-lists/calling-list.routes.js';
 
+import {cpReminderRouter,pushDeviceRouter} from '../modules/cp-reminders/cp-reminders.routes.js';
 export const apiRouter = Router();
+apiRouter.use('/cp-reminders',cpReminderRouter);
+apiRouter.use('/push-devices',pushDeviceRouter);
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/announcements', announcementRouter);

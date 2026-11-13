@@ -4,7 +4,7 @@ export const EXCEL_TYPE = 'application/vnd.openxmlformats-officedocument.spreads
 export const MAX_EXCEL_SIZE = 5 * 1024 * 1024;
 export const MAX_ROWS = 10000;
 // XLSX is a ZIP archive. Bound its declared expansion before handing it to ExcelJS.
-function checkArchive(bytes: Buffer): void {
+export function checkCallingArchive(bytes: Buffer, maxExpanded = 30 * 1024 * 1024) {
   if (bytes.readUInt32LE(0) !== 0x04034b50) throw new AppError('Upload a valid .xlsx Excel workbook', 400);
   let end = -1;
   for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
@@ -12,21 +12,23 @@ function checkArchive(bytes: Buffer): void {
   }
   if (end < 0) throw new AppError('Invalid Excel archive', 400);
   const count = bytes.readUInt16LE(end + 10);
-  let cursor = bytes.readUInt32LE(end + 16), expanded = 0;
+  let cursor = bytes.readUInt32LE(end + 16), expanded = 0, worksheetCount = 0;
   if (count > 500 || bytes.readUInt16LE(end + 4) || bytes.readUInt16LE(end + 6)) throw new AppError('Workbook archive is too complex', 400);
   for (let i = 0; i < count; i++) {
     if (cursor + 46 > end || bytes.readUInt32LE(cursor) !== 0x02014b50) throw new AppError('Invalid Excel archive directory', 400);
     expanded += bytes.readUInt32LE(cursor + 24);
-    if (expanded > 30 * 1024 * 1024) throw new AppError('Workbook expands beyond the 30 MB limit', 400);
+    if (expanded > maxExpanded) throw new AppError('Workbook expands beyond the supported size limit', 400);
     const length = bytes.readUInt16LE(cursor + 28);
     const name = bytes.toString('utf8', cursor + 46, cursor + 46 + length);
+    if (/^xl\/worksheets\/[^/]+\.xml$/i.test(name)) worksheetCount++;
     if (/vbaProject|externalLinks/i.test(name)) throw new AppError('Macros and external workbook links are not supported', 400);
     cursor += 46 + length + bytes.readUInt16LE(cursor + 30) + bytes.readUInt16LE(cursor + 32);
   }
+  return { worksheetCount };
 }
 export async function parseCallingWorkbook(bytes: Buffer) {
   if (bytes.length < 22 || bytes.length > MAX_EXCEL_SIZE) throw new AppError('Excel files must be between 22 bytes and 5 MB', 400);
-  checkArchive(bytes);
+  checkCallingArchive(bytes);
   const workbook = new ExcelJS.Workbook();
   try { await workbook.xlsx.load(bytes as unknown as ExcelJS.Buffer); }
   catch { throw new AppError('Unable to read this workbook. Save it as an unencrypted .xlsx file', 400); }
