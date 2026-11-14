@@ -1,3 +1,4 @@
+import { startCpImportWorker } from './modules/cp-imports/cp-import.service.js';
 import { retireAdminHeadRole } from './modules/roles/services/retire-admin-head.js';
 import { startCallingDistributionWorker } from './modules/calling-lists/calling-bulk.service.js';
 import {startCpReminderWorker} from './modules/cp-reminders/cp-reminders.worker.js';
@@ -11,12 +12,14 @@ async function start(): Promise<void> {
   await connectDatabase();
   await migrateSystemRoleNames();
   await retireAdminHeadRole();
+  const stopCpImports = startCpImportWorker();
   const stopCpReminders = startCpReminderWorker();
   const stopCallingWorker = startCallingDistributionWorker();
   const server = app.listen(env.port, () => logger.info({ port: env.port }, 'Sunvika API listening'));
 
   const shutdown = (signal: string): void => {
     logger.info({ signal }, 'Shutting down');
+    stopCpImports();
     stopCallingWorker();
     stopCpReminders();
     server.close((error) => {

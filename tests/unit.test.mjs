@@ -1765,3 +1765,34 @@ test('candidate report export enforces RM/date scope and omits deleted or reassi
   assert.deepEqual(result[2].values,[]);assert.match(result[2].availability,/reassigned/);
   await assert.rejects(callingReportCandidates(actor,'DAY','2026-11-14',String(otherRm)),error=>error.statusCode===404);
 });
+
+
+test('CP bulk template has only headers, parses reordered columns and rejects invalid workbooks', async () => {
+  const {default:ExcelJS}=await import('exceljs');
+  const {cpImportTemplate,parseCpImport,CP_IMPORT_HEADERS}=await import('../dist/modules/cp-imports/cp-import.excel.js');
+  const template=await cpImportTemplate();const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(template.base64,'base64'));
+  const sheet=book.worksheets[0];assert.equal(sheet.rowCount,1);assert.deepEqual(sheet.getRow(1).values.slice(1),[...CP_IMPORT_HEADERS]);
+  sheet.addRow(['','Test','','Partner','cp@example.invalid','+919876543210','Test address','Chhattisgarh','Raipur','','','','RM-1']);
+  let bytes=Buffer.from(await book.xlsx.writeBuffer());const result=await parseCpImport(bytes);
+  assert.equal(result[0].rowNumber,2);assert.equal(result[0].fields['Mobile number'],'+919876543210');
+  assert.equal(result[0].fields['Reporting RM employee code'],'RM-1');
+  const legacy=new ExcelJS.Workbook();legacy.addWorksheet('CP').addRows([[...CP_IMPORT_HEADERS].slice(0,-1),sheet.getRow(2).values.slice(1,-1)]);
+  assert.equal((await parseCpImport(Buffer.from(await legacy.xlsx.writeBuffer())))[0].fields['Reporting RM employee code'],'');
+  const reordered=new ExcelJS.Workbook();const rows=reordered.addWorksheet('CP');rows.addRow([...CP_IMPORT_HEADERS].reverse());rows.addRow([...sheet.getRow(2).values.slice(1)].reverse());
+  assert.equal((await parseCpImport(Buffer.from(await reordered.xlsx.writeBuffer())))[0].fields.Email,'cp@example.invalid');
+  rows.getCell('A1').value='Unexpected column';await assert.rejects(parseCpImport(Buffer.from(await reordered.xlsx.writeBuffer())),e=>e.statusCode===400);
+  await assert.rejects(parseCpImport(Buffer.from('invalid')),e=>e.statusCode===400);
+  await assert.rejects(parseCpImport(undefined),e=>e.statusCode===400);
+  await assert.rejects(parseCpImport(Buffer.from(template.base64,'base64')),e=>e.statusCode===400);
+  for(let i=0;i<500;i++)sheet.addRow(sheet.getRow(2).values);
+  await assert.rejects(parseCpImport(Buffer.from(await book.xlsx.writeBuffer())),/500/);
+});
+
+test('CP bulk import requires explicit confirmation and valid upload metadata',async()=>{
+  const {cpImportConfirmSchema,cpImportPreviewSchema}=await import('../dist/modules/cp-imports/cp-import.routes.js');
+  assert.equal(cpImportConfirmSchema.validate({confirmed:true}).error,undefined);
+  for(const input of [{},{confirmed:false},{confirmed:'true'},{confirmed:true,owner:'fake'}])assert.ok(cpImportConfirmSchema.validate(input).error);
+  assert.equal(cpImportPreviewSchema.validate({managerId:'0123456789abcdef01234567',fileName:'partners.xlsx'}).error,undefined);
+  assert.equal(cpImportPreviewSchema.validate({fileName:'partners.xlsx'}).error,undefined);
+  for(const fileName of ['../partners.xlsx','partners.xls','folder/partners.xlsx'])assert.ok(cpImportPreviewSchema.validate({managerId:'0123456789abcdef01234567',fileName}).error);
+});

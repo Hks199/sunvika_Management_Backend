@@ -1,3 +1,4 @@
+import { cpImportRouter } from '../modules/cp-imports/cp-import.routes.js';
 import { announcementRouter } from '../modules/announcements/announcement.routes.js';
 import { queryRouter, notificationRouter } from '../modules/queries/query.routes.js';
 import { Router } from 'express';
@@ -30,6 +31,7 @@ apiRouter.use('/announcements', announcementRouter);
 apiRouter.use('/queries', queryRouter);
 apiRouter.use('/notifications', notificationRouter);
 apiRouter.use('/employees', employeeRouter);
+apiRouter.use('/cp-imports', cpImportRouter);
 apiRouter.use('/calling-lists', callingListRouter);
 apiRouter.use('/calling-reports', callingReportRouter);
 apiRouter.use('/roles', roleRouter);

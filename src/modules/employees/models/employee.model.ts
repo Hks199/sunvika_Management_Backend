@@ -1,6 +1,7 @@
 import { Schema, model, type InferSchemaType } from 'mongoose';
 
 const employeeSchema = new Schema({
+  cpImportKey: { type: String, select: false },
   sourceCustomer: { type: Schema.Types.ObjectId, ref: 'Customer' },
   employeeCode: { type: String, required: true, trim: true, uppercase: true, unique: true },
   firstName: { type: String, required: true, trim: true, maxlength: 80 },
@@ -29,6 +30,7 @@ const employeeSchema = new Schema({
 }, { timestamps: true, strict: 'throw' });
 
 employeeSchema.index({ sourceCustomer: 1 }, { unique: true, partialFilterExpression: { sourceCustomer: { $type: 'objectId' } } });
+employeeSchema.index({ cpImportKey: 1 }, { unique: true, partialFilterExpression: { cpImportKey: { $type: 'string' } } });
 employeeSchema.index({ hierarchyPath: 1 });
 employeeSchema.index({ reportingTo: 1, isActive: 1 });
 employeeSchema.index({ role: 1, isActive: 1 });

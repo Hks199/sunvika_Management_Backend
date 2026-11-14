@@ -138,3 +138,10 @@ test('CP reminder schedules, history and push device registration require authen
   const id='0123456789abcdef01234567';
   for(const [method,path] of [['GET','/cp-reminders'],['GET','/cp-reminders/managers'],['POST',`/cp-reminders/${id}`],['PATCH',`/cp-reminders/schedules/${id}`],['DELETE',`/cp-reminders/schedules/${id}`],['GET',`/cp-reminders/${id}/history`],['POST','/push-devices'],['POST','/push-devices/unregister']])assert.equal((await fetch(`${baseUrl}/api/v1${path}`,{method})).status,401);
 });
+
+
+test('CP bulk import template, preview, history and confirmation reject anonymous access',async()=>{
+  for(const [method,path] of [['GET','/cp-imports/template'],['GET','/cp-imports/options'],['GET','/cp-imports'],['PUT','/cp-imports/preview'],['GET','/cp-imports/0123456789abcdef01234567'],['POST','/cp-imports/0123456789abcdef01234567/confirm']]){
+    const response=await fetch(`${baseUrl}/api/v1${path}`,{method});assert.equal(response.status,401,`${method} ${path}`);
+  }
+});

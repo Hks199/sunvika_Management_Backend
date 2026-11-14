@@ -1,0 +1,5 @@
+import { Schema,model } from 'mongoose';
+const rowSchema=new Schema({manager:{type:Schema.Types.ObjectId,ref:'Employee'},managerName:String,managerCode:String,rowNumber:{type:Number,required:true},fields:{type:Schema.Types.Mixed,required:true},payload:{type:Schema.Types.Mixed},validationErrors:[String],status:{type:String,enum:['PENDING','CREATED','FAILED'],default:'PENDING'},employee:{type:Schema.Types.ObjectId,ref:'Employee'},invitationSent:{type:Boolean,default:false},error:{type:String,default:''}},{_id:false});
+const schema=new Schema({owner:{type:Schema.Types.ObjectId,ref:'Employee',required:true},manager:{type:Schema.Types.ObjectId,ref:'Employee'},fileName:{type:String,required:true},state:{type:String,enum:['PREVIEW','INVALID','QUEUED','PROCESSING','COMPLETED'],required:true},rows:{type:[rowSchema],required:true},lockOwner:String,lockedUntil:Date},{timestamps:true,strict:'throw'});
+schema.index({state:1,lockedUntil:1,createdAt:1});schema.index({owner:1,createdAt:-1});
+export const CpImportModel=model('CpImport',schema);
