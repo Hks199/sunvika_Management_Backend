@@ -126,6 +126,41 @@ test('record list filters accept branch, date range, and employee name while rej
   }
 });
 
+test('customer type filter validates supported values', () => {
+  assert.equal(customerListQuerySchema.validate({ customerType: 'customer_only' }).error, undefined);
+  assert.equal(customerListQuerySchema.validate({}).error, undefined);
+  assert.ok(customerListQuerySchema.validate({ customerType: 'invalid' }).error);
+});
+
+test('customer-only filtering preserves RM scope, search, and matching pagination counts', async (t) => {
+  const { Types } = await import('mongoose');
+  const { EmployeeModel } = await import('../dist/modules/employees/models/employee.model.js');
+  const { RoleModel } = await import('../dist/modules/roles/models/role.model.js');
+  const { CustomerModel } = await import('../dist/modules/customers/models/customer.model.js');
+  const { hierarchyService } = await import('../dist/modules/employees/services/hierarchy.service.js');
+  const { customerService } = await import('../dist/modules/customers/services/customer.service.js');
+  const actor = new Types.ObjectId(), role = new Types.ObjectId(), customerId = new Types.ObjectId();
+  const chain = value => { const q = { select: () => q, populate: () => q, sort: () => q, skip: () => q, limit: () => q, lean: async () => value }; return q; };
+  t.mock.method(EmployeeModel, 'findById', () => chain({ role }));
+  t.mock.method(RoleModel, 'findById', () => chain({ code: 'RM', category: 'PRIMARY' }));
+  t.mock.method(hierarchyService, 'getDownlineEmployeeIds', async () => [actor]);
+  let listQuery, countQuery;
+  t.mock.method(CustomerModel, 'find', query => {
+    if (!query._id) return { distinct: async () => [customerId] };
+    listQuery = query;
+    return chain([]);
+  });
+  t.mock.method(CustomerModel, 'countDocuments', async query => { countQuery = query; return 0; });
+  await customerService.list(actor, { page: 1, limit: 20 }, { customerType: 'customer_only', search: 'Test' });
+  assert.deepEqual(listQuery._id, { $in: [customerId] });
+  assert.equal(listQuery.cpEmployee, null);
+  assert.ok(listQuery.$or.length);
+  assert.deepEqual(countQuery, listQuery);
+  await customerService.list(actor, { page: 1, limit: 20 }, {});
+  assert.deepEqual(listQuery._id, { $in: [customerId] });
+  assert.equal(Object.hasOwn(listQuery, 'cpEmployee'), false);
+});
+
 test('AMC contract validation requires a customer, positive amount, and ordered dates', () => {
   const valid = createContractSchema.validate({ customerId: '0123456789abcdef01234567', startDate: '2026-01-01', expiryDate: '2027-01-01', amount: 12500 });
   assert.equal(valid.error, undefined);
@@ -879,6 +914,7 @@ test('query validation requires a recipient, content and bounded visible message
   const id='0123456789abcdef01234567';
   const valid={title:'  Need assistance  ',body:'  Please review  ',recipientRole:'MIS',recipientId:id};
   assert.equal(createQuerySchema.validate(valid).value.title,'Need assistance');
+  assert.equal(createQuerySchema.validate({...valid,recipientRole:'RM'}).error,undefined);
   for(const change of [{title:' '},{body:' '},{body:'x'.repeat(5001)},{recipientRole:'MD'},{recipientId:'bad'}]) assert.ok(createQuerySchema.validate({...valid,...change}).error);
   assert.ok(replyQuerySchema.validate({body:''}).error);
   assert.equal(seenQuerySchema.validate({messageIds:[id]}).error,undefined);
@@ -905,6 +941,53 @@ test('query recipients restrict CP Head to the actual upline but permit active M
   code='MD';await queryService.recipients(sender);
   assert.equal(selection.$or[1]._id,undefined);
   code='MIS';await assert.rejects(queryService.recipients(sender),error=>error.statusCode===403);
+});
+
+test('CP queries target only their active reporting RM and notify RM, CP and MD on messages', async (t) => {
+  const { default: mongoose, Types } = await import('mongoose');
+  const { EmployeeModel } = await import('../dist/modules/employees/models/employee.model.js');
+  const { RoleModel } = await import('../dist/modules/roles/models/role.model.js');
+  const { QueryThreadModel, QueryMessageModel, QueryNotificationModel } = await import('../dist/modules/queries/query.models.js');
+  const { queryService } = await import('../dist/modules/queries/query.service.js');
+  const cp=new Types.ObjectId(),rm=new Types.ObjectId(),otherRm=new Types.ObjectId(),md=new Types.ObjectId(),rmRole=new Types.ObjectId(),mdRole=new Types.ObjectId();
+  const thread={_id:new Types.ObjectId(),title:'RM help',createdBy:cp,assignedTo:rm,recipientRole:'RM'};
+  let code='CP', activeRm=true, reportingTo=rm, selection, deliveries=[];
+  const chain=value=>{const q={select:()=>q,sort:()=>q,session:()=>q,lean:async()=>value};return q;};
+  t.mock.method(EmployeeModel,'findOne',()=>chain({role:new Types.ObjectId(),reportingTo,hierarchyPath:[rm]}));
+  t.mock.method(RoleModel,'findOne',()=>chain({code}));
+  t.mock.method(RoleModel,'find',query=>chain(query.code==='MD'?[{_id:mdRole}]:[{_id:rmRole,code:'RM'}]));
+  t.mock.method(EmployeeModel,'find',query=>{
+    if(!query.$or)return chain([{_id:md}]);
+    selection=query;
+    const eligible=query.$or.some(item=>item.role.$in.some(value=>value.equals(rmRole)) && (!Object.hasOwn(item,'_id') || String(item._id)===String(rm)));
+    return chain(activeRm && eligible?[{_id:rm,role:rmRole,firstName:'Manager'}]:[]);
+  });
+  t.mock.method(mongoose.connection,'transaction',async operation=>operation({}));
+  t.mock.method(QueryThreadModel,'create',async rows=>{assert.equal(rows[0].recipientRole,'RM');assert.equal(String(rows[0].assignedTo),String(rm));return [thread];});
+  t.mock.method(QueryThreadModel,'findById',()=>chain(thread));
+  t.mock.method(QueryThreadModel,'updateOne',async()=>({}));
+  t.mock.method(QueryMessageModel,'create',async()=>[{_id:new Types.ObjectId()}]);
+  t.mock.method(QueryNotificationModel,'insertMany',async rows=>{deliveries=rows;return rows;});
+  assert.equal((await queryService.recipients(cp))[0].roleCode,'RM');
+  assert.equal(selection.isActive,true);
+  assert.equal(String(selection.$or[2]._id),String(rm));
+  await assert.rejects(queryService.create(cp,{title:'Help',body:'Help',recipientRole:'RM',recipientId:String(otherRm)}),error=>error.statusCode===400);
+  activeRm=false;
+  await assert.rejects(queryService.create(cp,{title:'Help',body:'Help',recipientRole:'RM',recipientId:String(rm)}),error=>error.statusCode===400);
+  activeRm=true;reportingTo=undefined;
+  assert.deepEqual(await queryService.recipients(cp),[]);
+  reportingTo=rm;
+  await queryService.create(cp,{title:'Help',body:'Help',recipientRole:'RM',recipientId:String(rm)});
+  assert.deepEqual(deliveries.map(row=>String(row.recipient)),[rm,md].map(String));
+  code='RM';
+  await queryService.reply(rm,String(thread._id),'Answer');
+  assert.deepEqual(deliveries.map(row=>String(row.recipient)),[cp,md].map(String));
+  await assert.rejects(queryService.reply(otherRm,String(thread._id),'Unauthorized'),error=>error.statusCode===404);
+  assert.equal(selection.$or[2]._id.equals(rm),true);
+  assert.deepEqual(await queryService.recipients(rm),[]);
+  code='MD';
+  assert.equal((await queryService.recipients(md))[0].roleCode,'RM');
+  assert.equal(selection.$or[2]._id,undefined);
 });
 
 test('query creation and replies persist messages and every MD notification in the same transaction', async (t) => {
@@ -1596,4 +1679,89 @@ test('only RM, their CP Head and MD may control an RM notification schedule',asy
   assert.equal(canControlRm('CP_HEAD','other','rm',['md','head']),false);
   assert.equal(canControlRm('MD','md','rm',[]),true);
   for(const role of ['MIS','CP','MH','ADMIN_HEAD'])assert.equal(canControlRm(role,'head','rm',['head']),false);
+});
+
+
+test('calling report Excel preserves filtered totals, daily details and safe literal text', async () => {
+  const { default: ExcelJS } = await import('exceljs');
+  const { buildCallingReportExcel } = await import('../dist/modules/calling-reports/calling-report.excel.js');
+  const rm={_id:'rm1',firstName:'Test',lastName:'Manager',employeeCode:'RM-1'};
+  const totals={called:8,converted:2,interested:3,followUp:1};
+  const sheet={list:'list1',sheetName:'=HYPERLINK("https://example.invalid")',...totals};
+  const days=['2026-11-13','2026-11-14'].map(day=>({day,rm,sheets:[sheet],totals,isCurrent:true,report:{status:'VERIFIED',verifiedBy:rm,verifiedAt:'2026-11-14T04:00:00Z',reviewNote:'Reviewed'}}));
+  const summary={period:'WEEK',fromDay:'2026-11-08',toDay:'2026-11-14',timeZone:'Asia/Kolkata',totals,sheets:[{...sheet,rm}],days};
+  const result=await buildCallingReportExcel(summary,'Test Manager RM-1');
+  assert.equal(result.fileName,'Calling-report-WEEK-2026-11-08-to-2026-11-14.xlsx');
+  const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(Buffer.from(result.base64,'base64'));
+  assert.deepEqual(workbook.worksheets.map(sheet=>sheet.name),['Summary','Consolidated sheets','Daily details','Candidate details']);
+  const overview=workbook.getWorksheet('Summary');
+  assert.equal(overview.getCell('B6').value,'Test Manager RM-1');
+  assert.equal(overview.getCell('B7').value,8);
+  const consolidated=workbook.getWorksheet('Consolidated sheets');
+  assert.equal(consolidated.getCell('D3').value,8); // Daily repetitions must not be summed into period Total calling.
+  assert.equal(consolidated.getCell('C2').value,sheet.sheetName);
+  assert.equal(consolidated.getCell('C2').type,ExcelJS.ValueType.String);
+  const daily=workbook.getWorksheet('Daily details');
+  assert.equal(daily.rowCount,3);
+  assert.equal(daily.getCell('I2').value,'Verified');
+  assert.equal(daily.getCell('L2').value,'Reviewed');
+  assert.equal(daily.getCell('A3').value,'2026-11-14');
+  assert.equal(daily.getCell('E2').type,ExcelJS.ValueType.Number);
+  const empty=await buildCallingReportExcel({...summary,days:[],sheets:[],totals:{called:0,converted:0,interested:0,followUp:0}});
+  const emptyBook=new ExcelJS.Workbook();await emptyBook.xlsx.load(Buffer.from(empty.base64,'base64'));
+  assert.equal(emptyBook.getWorksheet('Daily details').rowCount,1);
+  assert.equal(emptyBook.getWorksheet('Summary').getCell('B7').value,0);
+});
+
+
+test('candidate Excel includes every uploaded column as literal text and preserves contact numbers', async () => {
+  const { default: ExcelJS } = await import('exceljs');
+  const { buildCallingReportExcel } = await import('../dist/modules/calling-reports/calling-report.excel.js');
+  const counts={called:1,converted:0,interested:1,followUp:0};
+  const summary={period:'DAY',fromDay:'2026-11-14',toDay:'2026-11-14',timeZone:'Asia/Kolkata',totals:counts,sheets:[],days:[]};
+  const base={rmName:'Test RM',rmCode:'RM-1',sheetName:'List A',rowNumber:2,activityAt:new Date('2026-11-14T04:00:00Z'),activityKind:'OUTCOME',periodStatus:'INTERESTED',currentStatus:'NEEDS_FOLLOWUP',note:'Call tomorrow',followUpAt:new Date('2026-11-15T04:00:00Z'),cpCode:'',availability:'Available'};
+  const candidates=[{...base,headers:['Name','Mobile','Email','Extra'],values:['Candidate','09876543210','test@example.invalid','=1+1']},{...base,sheetName:'List B',headers:['Mobile','Name','City'],values:['00123456789','Second','Raipur']}];
+  const result=await buildCallingReportExcel(summary,undefined,candidates);
+  const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(result.base64,'base64'));
+  const sheet=book.getWorksheet('Candidate details');
+  const headers=sheet.getRow(1).values;
+  const column=name=>headers.indexOf(name);
+  assert.equal(sheet.rowCount,3);
+  assert.equal(sheet.getRow(2).getCell(column('Candidate: Mobile')).value,'09876543210');
+  assert.equal(sheet.getRow(3).getCell(column('Candidate: Mobile')).value,'00123456789');
+  assert.equal(sheet.getRow(3).getCell(column('Candidate: Name')).value,'Second');
+  assert.equal(sheet.getRow(2).getCell(column('Candidate: City')).value,'');
+  const formula=sheet.getRow(2).getCell(column('Candidate: Extra'));
+  assert.equal(formula.value,'=1+1');assert.equal(formula.type,ExcelJS.ValueType.String);
+  assert.equal(sheet.getRow(2).getCell(column('Status in report period')).value,'Interested');
+  assert.equal(sheet.getRow(2).getCell(column('Current status')).value,'Needs follow-up');
+});
+
+test('candidate report export enforces RM/date scope and omits deleted or reassigned private details', async t => {
+  const { Types } = await import('mongoose');
+  const { EmployeeModel } = await import('../dist/modules/employees/models/employee.model.js');
+  const { RoleModel } = await import('../dist/modules/roles/models/role.model.js');
+  const { CallingActivityModel } = await import('../dist/modules/calling-reports/calling-report.models.js');
+  const { CallingListModel, CallingCandidateModel } = await import('../dist/modules/calling-lists/calling-list.model.js');
+  const { callingReportCandidates } = await import('../dist/modules/calling-reports/calling-report-candidates.service.js');
+  const actor=new Types.ObjectId(),otherRm=new Types.ObjectId(),role=new Types.ObjectId(),list=new Types.ObjectId(),reassignedList=new Types.ObjectId(),candidate=new Types.ObjectId(),deleted=new Types.ObjectId(),privateCandidate=new Types.ObjectId();
+  const chain=value=>{const q={select:()=>q,sort:()=>q,populate:()=>q,lean:async()=>value};return q;};
+  t.mock.method(EmployeeModel,'findOne',()=>chain({role,isActive:true}));
+  t.mock.method(RoleModel,'findOne',()=>chain({code:'RM'}));
+  t.mock.method(RoleModel,'find',()=>chain([{_id:role}]));
+  t.mock.method(EmployeeModel,'find',filter=>{assert.equal(String(filter._id),String(actor));return chain([{_id:actor,firstName:'Test',lastName:'RM',employeeCode:'RM-1'}]);});
+  const event=(candidate,list,kind='OUTCOME')=>({rm:actor,list,candidate,sheetName:'List A',kind,status:'INTERESTED',occurredAt:new Date('2026-11-14T04:00:00Z')});
+  let pipeline,query;
+  t.mock.method(CallingActivityModel,'aggregate',input=>{pipeline=input;return Promise.resolve([event(candidate,list),event(deleted,list,'DELETED'),event(privateCandidate,reassignedList)]);});
+  t.mock.method(CallingListModel,'find',()=>chain([{_id:list,assignedTo:actor,headers:['Name','Mobile']},{_id:reassignedList,assignedTo:otherRm,headers:['Private']} ]));
+  t.mock.method(CallingCandidateModel,'find',filter=>{query=filter;return chain([{_id:candidate,list,rowNumber:2,values:['Name','00123456789'],callStatus:'INTERESTED',employee:null}]);});
+  const result=await callingReportCandidates(actor,'DAY','2026-11-14');
+  assert.deepEqual(pipeline[0].$match.rm.$in,[actor]);
+  assert.equal(pipeline[0].$match.occurredAt.$gte.toISOString(),'2026-11-13T18:30:00.000Z');
+  assert.equal(pipeline[0].$match.occurredAt.$lt.toISOString(),'2026-11-14T18:30:00.000Z');
+  assert.ok(query.$or.every(item=>String(item.list)===String(list)));
+  assert.deepEqual(result[0].values,['Name','00123456789']);
+  assert.deepEqual(result[1].values,[]);assert.match(result[1].availability,/permanently deleted/);
+  assert.deepEqual(result[2].values,[]);assert.match(result[2].availability,/reassigned/);
+  await assert.rejects(callingReportCandidates(actor,'DAY','2026-11-14',String(otherRm)),error=>error.statusCode===404);
 });

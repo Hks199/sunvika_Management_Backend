@@ -116,7 +116,7 @@ test('announcement feeds and publishing require a live authenticated session',as
 
 
 test('calling daily reports and upline verification require authentication',async()=>{
-  for(const [method,path]of[['GET','/calling-reports/options'],['GET','/calling-reports?period=WEEK'],['POST','/calling-reports/today'],['POST','/calling-reports/0123456789abcdef01234567/verify']]){
+  for(const [method,path]of[['GET','/calling-reports/options'],['GET','/calling-reports/export?period=WEEK&date=2026-11-14'],['GET','/calling-reports?period=WEEK'],['POST','/calling-reports/today'],['POST','/calling-reports/0123456789abcdef01234567/verify']]){
     const response=await fetch(`${baseUrl}/api/v1${path}`,{method});assert.equal(response.status,401,`${method} ${path}`);
   }
 });

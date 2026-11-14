@@ -17,6 +17,7 @@ export const updateCustomerSchema = Joi.object({
   status: Joi.string().valid('ONBOARDING', 'ACTIVE', 'COMPLETED', 'CANCELLED')
 }).min(1).required();
 export const customerListQuerySchema = Joi.object({
+  customerType: Joi.string().valid('customer_only'),
   page: Joi.number().integer().min(1).default(1), limit: Joi.number().integer().min(1).max(100).default(20), search: Joi.string().trim().max(100),
   branchId: objectId, dateFrom: Joi.date().iso(), dateTo: Joi.date().iso(), employeeName: Joi.string().trim().min(1).max(100)
 }).unknown(false).custom((value, helpers) => value.dateFrom && value.dateTo && value.dateFrom > value.dateTo

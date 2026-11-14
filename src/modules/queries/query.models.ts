@@ -3,7 +3,7 @@ const threadSchema = new Schema({
   title: { type: String, required: true, maxlength: 160, trim: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
   assignedTo: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
-  recipientRole: { type: String, enum: ['CP_HEAD', 'MIS'], required: true },
+  recipientRole: { type: String, enum: ['CP_HEAD', 'MIS', 'RM'], required: true },
   lastMessageAt: { type: Date, required: true }
 }, { timestamps: true, strict: 'throw' });
 threadSchema.index({ createdBy: 1, lastMessageAt: -1 });

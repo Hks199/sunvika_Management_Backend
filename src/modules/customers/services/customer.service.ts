@@ -117,10 +117,11 @@ export const customerService = {
     if (!convertedCustomer) throw new AppError('Customer conversion failed', 500);
     return { customer: convertedCustomer, alreadyConverted: false };
   },
-  async list(actorId: Types.ObjectId, pagination: PaginationInput, filters: RecordListFilters & { search?: string }) {
+  async list(actorId: Types.ObjectId, pagination: PaginationInput, filters: RecordListFilters & { search?: string; customerType?: 'customer_only' }) {
     const ids = await customerScope(actorId);
     const query: Record<string, unknown> = {};
     if (ids) query._id = { $in: ids };
+    if (filters.customerType === 'customer_only') query.cpEmployee = null;
     if (filters.employeeName) {
       const employeeScope = await resolveEmployeeScope(actorId, filters.employeeName, await accessibleEmployeeScope(actorId));
       if (employeeScope) query.$and = [{ $or: [{ creatorId: { $in: employeeScope } }, { cpEmployee: { $in: employeeScope } }] }];

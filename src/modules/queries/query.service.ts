@@ -9,7 +9,7 @@ import {CpReminderNotificationModel} from '../cp-reminders/cp-reminders.model.js
 const personFields = 'firstName middleName lastName employeeCode';
 function id(value: string) { if (!Types.ObjectId.isValid(value)) throw new AppError('Invalid query or notification ID', 400); return new Types.ObjectId(value); }
 async function actor(actorId: Types.ObjectId) {
-  const employee = await EmployeeModel.findOne({ _id: actorId, isActive: true }).select('role hierarchyPath').lean();
+  const employee = await EmployeeModel.findOne({ _id: actorId, isActive: true }).select('role hierarchyPath reportingTo').lean();
   const role = employee ? await RoleModel.findOne({ _id: employee.role, isActive: true }).select('code').lean() : null;
   if (!employee || !role || !QUERY_ROLES.includes(role.code)) throw new AppError('Queries are not available for your role', 403);
   return { employee, code: role.code };
@@ -23,12 +23,15 @@ async function access(actorId: Types.ObjectId, threadId: string) {
 async function recipients(actorId: Types.ObjectId) {
   const user = await actor(actorId);
   if (!canRaiseQuery(user.code)) throw new AppError('Only RM, CP and MD can raise queries', 403);
-  const roles = await RoleModel.find({ code: { $in: ['CP_HEAD', 'MIS'] }, isActive: true }).select('_id code').lean();
+  const includeRm = user.code === 'CP' || user.code === 'MD';
+  const roles = await RoleModel.find({ code: { $in: ['CP_HEAD', 'MIS', ...(includeRm ? ['RM'] : [])] }, isActive: true }).select('_id code').lean();
   const heads = roles.filter(role => role.code === 'CP_HEAD').map(role => role._id);
   const mis = roles.filter(role => role.code === 'MIS').map(role => role._id);
+  const rms = roles.filter(role => role.code === 'RM').map(role => role._id);
   const people = await EmployeeModel.find({ isActive: true, $or: [
     { role: { $in: mis } },
-    { role: { $in: heads }, ...(user.code === 'MD' ? {} : { _id: { $in: user.employee.hierarchyPath } }) }
+    { role: { $in: heads }, ...(user.code === 'MD' ? {} : { _id: { $in: user.employee.hierarchyPath } }) },
+    ...(includeRm ? [{ role: { $in: rms }, ...(user.code === 'MD' ? {} : { _id: user.employee.reportingTo ?? null }) }] : [])
   ] }).select(personFields + ' role').sort({ firstName: 1, lastName: 1 }).lean();
   return people.map(person => ({ _id: person._id, firstName: person.firstName, middleName: person.middleName, lastName: person.lastName, employeeCode: person.employeeCode, roleCode: roles.find(role => role._id.equals(person.role))!.code }));
 }
